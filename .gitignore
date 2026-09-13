@@ -28,4 +28,5 @@ dist/
 .DS_Store
 
 # 日志
+logs/
 *.log
