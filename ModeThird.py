@@ -85,10 +85,7 @@ with gr.Blocks(title="配置文件编辑模式") as demo:
     if (True):
             
             import_json_button.click(
-                lambda config_file: [
-                    *import_json_config(config_file),
-                    os.path.join(os.path.dirname(os.path.abspath(__file__)), 'jsons', config_file)
-                ],
+                import_json_config,
                 inputs=json_file_input,
                 outputs=[num_students_input, rows_input, cols_input, students_data_output, optimization_input, mode_output, team_nums, sorts_output, groups_output, reserved_seats_output],
                     api_name="import_json"
@@ -214,4 +211,5 @@ with gr.Blocks(title="配置文件编辑模式") as demo:
                 outputs=save_config_output
             )
 
-demo.launch()
+if __name__ == "__main__":
+    demo.launch()

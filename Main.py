@@ -104,7 +104,8 @@ with gr.Blocks(title="班级座位排列工具") as demo:
 
     demo.close(on_close)
 
-try:
-    demo.launch(server_port=7860, share=True, pwa=True)
-except:
-    raise ValueError("人脸工具启动失败，请确保本地端口7860未被占用")
+if __name__ == "__main__":
+    try:
+        demo.launch(server_port=7860, share=True, pwa=True)
+    except:
+        raise ValueError("人脸工具启动失败，请确保本地端口7860未被占用")

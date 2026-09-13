@@ -527,4 +527,5 @@ with gr.Blocks(title="自定义输入模式") as demo:
                 outputs=save_config_output
             )
 
-demo.launch(css=".gradio-textarea { height: auto; overflow: visible; }")
+if __name__ == "__main__":
+    demo.launch(css=".gradio-textarea { height: auto; overflow: visible; }")

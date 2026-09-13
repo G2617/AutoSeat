@@ -96,10 +96,7 @@ with gr.Blocks(title="配置文件直接导入模式") as demo:
 
             # 导入 JSON 配置
         import_json_button.click(
-            lambda config_file: [
-                *import_json_config(config_file),
-                os.path.join(os.path.dirname(os.path.abspath(__file__)), 'jsons', config_file)
-            ],
+            import_json_config,
             inputs=json_file_input,
             outputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, teams_output, sorts_output, groups_output, reserved_seats_output],
             api_name="import_json"
@@ -187,10 +184,7 @@ with gr.Blocks(title="配置文件直接导入模式") as demo:
         )
 
         regenerate_button.click(
-            lambda config_file: [
-                *import_json_config(config_file),
-                os.path.join(os.path.dirname(os.path.abspath(__file__)), 'jsons', config_file)
-            ],
+            import_json_config,
             inputs=json_file_input,
             outputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, teams_output, sorts_output, groups_output, reserved_seats_output],
             api_name="import_json"
@@ -298,4 +292,5 @@ with gr.Blocks(title="配置文件直接导入模式") as demo:
             outputs=save_config_output
         )
 
-demo.launch(css=".gradio-textarea { height: auto; overflow: visible; }")
+if __name__ == "__main__":
+    demo.launch(css=".gradio-textarea { height: auto; overflow: visible; }")

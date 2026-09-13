@@ -638,7 +638,8 @@ def main():
             outputs=None
         )
 
-    demo.launch(server_port=7861)
+    if __name__ == "__main__":
+        demo.launch(server_port=7861)
 
 
 if __name__ == "__main__":

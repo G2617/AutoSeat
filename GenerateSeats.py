@@ -8,10 +8,134 @@ import datetime
 import io
 import os
 import hashlib
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from matplotlib.colors import LinearSegmentedColormap
 from PIL import Image, ImageDraw, ImageFont
+import AlgorithmFunctions
 from AlgorithmFunctions import manhattan_distance, generate_unique_abbreviation
 from Debugging import log_record, debug
+
+
+def _train_q_episode(payload):
+    """Train one independent episode in a separate process."""
+    (initial_solution, students, continuous_targets, groups, rows, cols,
+     movable_names, initial_weights, max_height, min_height, action_count) = payload
+    episode_weights = initial_weights.copy()
+
+    def positions_map(solution):
+        return {(student, (i, j))
+                for i, row in enumerate(solution)
+                for j, student in enumerate(row)
+                if student not in ('空', '预留空位')}
+
+    positions_by_student = {
+        student[1]: student[2] for student in students
+    }
+
+    def energy(solution):
+        positions = dict(positions_map(solution))
+        height_energy = sum(
+            (positions[name][0] - continuous_targets.get(name, (0.0, 0.0))[0]) ** 2
+            for _, name, _ in students if name in positions
+        )
+        height_order_energy = 0.0
+        positioned = [student for student in students if student[1] in positions]
+        for index, (_, first, first_height) in enumerate(positioned):
+            for _, second, second_height in positioned[index + 1:]:
+                first_row, second_row = positions[first][0], positions[second][0]
+                if first_height < second_height and first_row > second_row:
+                    height_order_energy += (first_row - second_row) ** 2
+                elif first_height > second_height and first_row < second_row:
+                    height_order_energy += (second_row - first_row) ** 2
+        row_heights = []
+        for row_index in range(rows):
+            values = [positions_by_student[name] for name, (row, _) in positions.items()
+                      if row == row_index]
+            if values:
+                row_heights.append((row_index, sum(values) / len(values)))
+        row_profile_energy = sum(
+            max(0.0, previous - following) ** 2
+            for (_, previous), (_, following) in zip(row_heights, row_heights[1:])
+        )
+        group_energy = 0.0
+        for group in (groups or []):
+            members = [name for name in group if name in positions]
+            distances = []
+            for index, first in enumerate(members):
+                for second in members[index + 1:]:
+                    p1, p2 = positions[first], positions[second]
+                    distances.append(abs(p1[0] - p2[0]) + abs(p1[1] - p2[1]))
+            if distances:
+                max_distance = max(1.0, rows + cols - 2)
+                group_energy += sum(
+                    1.0 - min(distance, max_distance) / max_distance
+                    for distance in distances
+                ) / len(distances)
+                group_energy += sum(5.0 for distance in distances if distance <= 1)
+        return (
+            0.25 * height_energy / (rows ** 2 + 1)
+            + 0.25 * height_order_energy / (rows ** 2 + 1)
+            + 0.20 * row_profile_energy / max(1.0, (max_height - min_height) ** 2)
+            + 0.30 * group_energy / max(1, rows ** 2 + cols ** 2)
+        )
+
+    def apply_swap(solution, first, second):
+        positions = dict(positions_map(solution))
+        result = [row[:] for row in solution]
+        p1, p2 = positions[first], positions[second]
+        result[p1[0]][p1[1]], result[p2[0]][p2[1]] = (
+            result[p2[0]][p2[1]], result[p1[0]][p1[1]]
+        )
+        return result
+
+    def select_action(solution, current_energy, epsilon):
+        positions = dict(positions_map(solution))
+        actions = [
+            (movable_names[i], movable_names[j])
+            for i in range(len(movable_names))
+            for j in range(i + 1, len(movable_names))
+            if movable_names[i] in positions and movable_names[j] in positions
+        ]
+        random.shuffle(actions)
+        scored = []
+        for first, second in actions[:min(96, len(actions))]:
+            candidate = apply_swap(solution, first, second)
+            candidate_energy = energy(candidate)
+            height_gap = abs(
+                positions_by_student[first] - positions_by_student[second]
+            ) / max(1.0, max_height - min_height)
+            delta = candidate_energy - current_energy
+            features = np.array(
+                [1.0, current_energy, candidate_energy, delta, height_gap, delta * delta],
+                dtype=np.float64,
+            )
+            scored.append((
+                float(np.dot(episode_weights, features)), candidate, candidate_energy,
+                features,
+            ))
+        if not scored:
+            return None
+        if random.random() < epsilon:
+            return random.choice(scored)
+        return max(scored, key=lambda item: item[0])
+
+    state = [row[:] for row in initial_solution]
+    state_energy = energy(state)
+    episode_steps = min(400, max(60, action_count * 2))
+    for _ in range(episode_steps):
+        selected = select_action(state, state_energy, epsilon=0.25)
+        if selected is None:
+            break
+        _, next_state, next_energy, features = selected
+        reward = state_energy - next_energy
+        next_selected = select_action(next_state, next_energy, epsilon=0.0)
+        next_value = next_selected[0] if next_selected else 0.0
+        target = reward + 0.85 * next_value
+        episode_weights += (
+            0.03 * (target - float(np.dot(episode_weights, features))) * features
+        )
+        state, state_energy = next_state, next_energy
+    return episode_weights, state_energy, state
 
 try:
     plt.rcParams['font.sans-serif'] = ['SimSun']
@@ -283,12 +407,21 @@ def generate_seating_arrangement(num_students, rows, cols, students_data, enable
         movable_names = [s[1] for s in students if s[1] not in (reserved_seats or {})]
         action_count = max(1, len(movable_names) * (len(movable_names) - 1) // 2)
         feature_size = 6
-        model_version = 3
-        config_signature = repr((
-            num_students, rows, cols, students_data, enable_optimization, mode,
-            teams, sorts, groups, reserved_seats
-        )).encode("utf-8")
-        config_hash = hashlib.sha256(config_signature).hexdigest()[:16]
+        model_version = 4
+        imported_config_path = AlgorithmFunctions.imported_json_file_path
+        if imported_config_path and os.path.isfile(imported_config_path):
+            # 直接对 JSON 原始字节做 SHA-256；同名文件内容变化必然得到新模型键。
+            with open(imported_config_path, "rb") as config_file:
+                config_hash = hashlib.sha256(config_file.read()).hexdigest()
+            model_source = os.path.basename(imported_config_path)
+        else:
+            # 自定义输入没有 JSON 文件时，使用等价配置内容作为回退指纹。
+            config_signature = repr((
+                num_students, rows, cols, students_data, enable_optimization, mode,
+                teams, sorts, groups, reserved_seats
+            )).encode("utf-8")
+            config_hash = hashlib.sha256(config_signature).hexdigest()
+            model_source = "runtime-input"
         model_path = os.path.join(
             os.path.dirname(os.path.abspath(__file__)),
             "rl_models", f"seat_q_policy_{config_hash}.npz"
@@ -299,9 +432,15 @@ def generate_seating_arrangement(num_students, rows, cols, students_data, enable
         if os.path.exists(model_path):
             loaded = np.load(model_path)
             if (loaded.get("model_version", np.array(0)).item() == model_version
+                    and loaded.get("config_hash", np.array("")).item() == config_hash
                     and loaded.get("weights", np.empty(0)).shape == (feature_size,)):
                 weights = loaded["weights"].astype(np.float64)
                 loaded_model = True
+        print(
+            f"[RL] Model binding: source={model_source}, sha256={config_hash}, "
+            f"loaded={loaded_model}",
+            flush=True,
+        )
 
         def candidate_actions(solution):
             positions = dict(get_positions_map(solution))
@@ -327,7 +466,7 @@ def generate_seating_arrangement(num_students, rows, cols, students_data, enable
             delta = next_energy - current_energy
             return np.array([1.0, current_energy, next_energy, delta, height_gap, delta * delta], dtype=np.float64)
 
-        def select_action(solution, current_energy, epsilon):
+        def select_action(solution, current_energy, epsilon, policy_weights):
             actions = candidate_actions(solution)
             if not actions:
                 return None
@@ -336,50 +475,58 @@ def generate_seating_arrangement(num_students, rows, cols, students_data, enable
                 candidate = apply_swap(solution, first, second)
                 candidate_energy = energy(candidate)
                 features = action_features(current_energy, candidate_energy, first, second)
-                scored.append((float(np.dot(weights, features)), first, second, candidate, candidate_energy, features))
+                scored.append((float(np.dot(policy_weights, features)), first, second,
+                               candidate, candidate_energy, features))
             if random.random() < epsilon:
                 return random.choice(scored)
             return max(scored, key=lambda item: item[0])
 
         # 每个配置独立训练，避免不同班级的奖励分布相互污染。
-        training_episodes = 40 if loaded_model else 80
+        training_episodes = 8 if loaded_model else 80
         print(
             f"[RL] Training started ({'fine-tuning' if loaded_model else 'first run'}), "
-            f"episodes={training_episodes}, actions={action_count}",
+            f"episodes={training_episodes}, actions={action_count}, "
+            f"workers={min(os.cpu_count() or 1, training_episodes, 8)}",
             flush=True,
         )
-        for episode in range(training_episodes):
-            state = [row[:] for row in current_solution]
-            state_energy = energy(state)
-            episode_steps = min(400, max(60, action_count * 2))
-            for _ in range(episode_steps):
-                selected = select_action(state, state_energy, epsilon=0.25)
-                if selected is None:
-                    break
-                _, first, second, next_state, next_energy, features = selected
-                reward = state_energy - next_energy
-                next_selected = select_action(next_state, next_energy, epsilon=0.0)
-                next_value = (next_selected[0] if next_selected else 0.0)
-                target = reward + 0.85 * next_value
-                weights += 0.03 * (target - float(np.dot(weights, features))) * features
-                state, state_energy = next_state, next_energy
-            print(
-                f"[RL] Training progress: {episode + 1}/{training_episodes}, "
-                f"energy={state_energy:.4f}",
-                flush=True,
-            )
+
+        worker_count = min(os.cpu_count() or 1, training_episodes, 8)
+        worker_payload = (
+            current_solution, students, continuous_targets, groups, rows, cols,
+            movable_names, weights, max_height, min_height, action_count
+        )
+        with ProcessPoolExecutor(max_workers=worker_count) as executor:
+            futures = [
+                executor.submit(_train_q_episode, worker_payload)
+                for _ in range(training_episodes)
+            ]
+            episode_results = []
+            for episode, future in enumerate(as_completed(futures), start=1):
+                episode_results.append(future.result())
+                energies = [result[1] for result in episode_results]
+                print(
+                    f"[RL] Training progress: {episode}/{training_episodes}, "
+                    f"current={energies[-1]:.4f}, mean={np.mean(energies):.4f}, "
+                    f"best={min(energies):.4f}",
+                    flush=True,
+                )
+
+        # 并行 episode 从同一初始布局出发；采用精英轨迹，避免平均权重稀释低能量策略。
+        best_training_result = min(episode_results, key=lambda result: result[1])
+        weights = best_training_result[0]
         np.savez(model_path, weights=weights, feature_size=feature_size,
-                 model_version=model_version)
+                 model_version=model_version, config_hash=config_hash)
         print(f"[RL] Model saved: {model_path}", flush=True)
 
-        best_solution = [row[:] for row in current_solution]
+        best_solution = [row[:] for row in best_training_result[2]]
         best_energy = energy(best_solution)
-        state = [row[:] for row in current_solution]
+        state = [row[:] for row in best_solution]
         state_energy = best_energy
         optimization_steps = min(800, max(120, action_count * 4))
         print(f"[RL] Inference optimization started: steps={optimization_steps}", flush=True)
         for step in range(optimization_steps):
-            selected = select_action(state, state_energy, epsilon=0.05)
+            selected = select_action(state, state_energy, epsilon=0.05,
+                                     policy_weights=weights)
             if selected is None:
                 break
             _, _, _, next_state, next_energy, _ = selected
