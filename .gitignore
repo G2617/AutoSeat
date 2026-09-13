@@ -1,0 +1,31 @@
+# Python 缓存
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 虚拟环境
+.venv/
+venv/
+env/
+ENV/
+
+# 打包/构建
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+
+# 环境变量与密钥
+.env
+.env.*
+!.env.example
+
+# IDE / 编辑器
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# 日志
+*.log
