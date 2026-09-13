@@ -1,20 +1,17 @@
 # Python 缓存
-__pycache__/
+/__pycache__/
 *.py[cod]
 *$py.class
 
 # 虚拟环境
-.venv/
-venv/
-env/
-ENV/
+/.venv/
+/venv/
+/env/
+/ENV/
 
 # 打包/构建
-build/
-dist/
-*.egg-info/
-*.egg
-.eggs/
+/build/
+/dist/
 
 # 环境变量与密钥
 .env
@@ -22,11 +19,11 @@ dist/
 !.env.example
 
 # IDE / 编辑器
-.idea/
-.vscode/
+/.idea/
+/.vscode/
 *.swp
 .DS_Store
 
 # 日志
-logs/
+/logs/
 *.log

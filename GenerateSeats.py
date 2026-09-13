@@ -7,7 +7,6 @@ import tempfile
 import datetime
 import io
 import os
-import math
 from matplotlib.colors import LinearSegmentedColormap
 from PIL import Image, ImageDraw, ImageFont
 from AlgorithmFunctions import manhattan_distance, generate_unique_abbreviation
@@ -153,273 +152,221 @@ def generate_seating_arrangement(num_students, rows, cols, students_data, enable
 ########################################################################################################################################################
 
     elif mode == 0 and enable_optimization:
-        # 使用连续光滑映射 + 能量函数的规划器
+        # 基于能量函数的离散动作 Q-learning；预留座位和小团体学生不参与动作。
         students = sorted(students_data, key=lambda x: x[2])
         initial_seating = [['空'] * cols for _ in range(rows)]
         assigned_students = set()
-
-        heights = [s[2] for s in students]
-        min_height = min(heights)
-        max_height = max(heights)
-
-        # 处理预留座位
         if reserved_seats:
             for student, (row, col) in reserved_seats.items():
-                if 0 <= row < rows and 0 <= col < cols:
-                    initial_seating[row][col] = student
-                    assigned_students.add(student)
-                else:
+                if not (0 <= row < rows and 0 <= col < cols):
                     raise ValueError("预留座位位置超出范围，请检查")
+                initial_seating[row][col] = student
+                assigned_students.add(student)
 
-        # 计算需要留出的空位数量
         empty_seats = rows * cols - num_students
-        if empty_seats > 0:
-            for i in range(rows - 1, -1, -1):
-                for j in range(cols - 1, -1, -1):
-                    if empty_seats > 0 and initial_seating[i][j] == '空':
-                        initial_seating[i][j] = '预留空位'
-                        empty_seats -= 1
+        for i in range(rows - 1, -1, -1):
+            for j in range(cols - 1, -1, -1):
+                if empty_seats > 0 and initial_seating[i][j] == '空':
+                    initial_seating[i][j] = '预留空位'
+                    empty_seats -= 1
 
-        # 构造连续光滑的身高->目标行映射函数
-        # 使用 tanh S 型映射以获得更平滑且可控的梯度
-        def height_to_row_continuous(h):
-            if max_height <= min_height:
-                return 0.0
-            h_norm = (h - min_height) / (max_height - min_height)
-            # tanh S 型，k 控制斜率，0.5 为中心
-            k = 6.0
-            s = 0.5 * (1.0 + math.tanh(k * (h_norm - 0.5)))
-            # 平移并缩放到行范围 [0, rows-1]
-            return s * (rows - 1)
-
-        # 列目标可以沿列方向平滑分布，利用身高排序索引做连续映射
+        heights = [s[2] for s in students]
+        min_height, max_height = min(heights), max(heights)
         total_unassigned = len([s for s in students if s[1] not in (reserved_seats or {})])
-        def index_to_col_continuous(idx):
-            if total_unassigned <= 1:
-                return (cols - 1) / 2.0
-            return (idx / (total_unassigned - 1)) * (cols - 1)
 
-        # 为每个学生构造连续目标位置 (row_target, col_target)
-        # 增加入一点随机扰动以提升随机性（每次运行结果差异更大）
+        def height_to_row(h):
+            if max_height == min_height:
+                return (rows - 1) / 2.0
+            normalized = (h - min_height) / (max_height - min_height)
+            return normalized * (rows - 1)
+
         continuous_targets = {}
-        # 按身高排序的未分配学生索引，用于列映射
-        unassigned_idx = 0
-        for s in students:
-            name = s[1]
+        target_index = 0
+        for student in students:
+            name = student[1]
             if name in (reserved_seats or {}):
                 continue
-            # 基准目标
-            r_t = height_to_row_continuous(s[2])
-            c_t = index_to_col_continuous(unassigned_idx)
-            # 添加小幅高斯扰动（标准差随行列大小缩放，确保连续性但带来随机性）
-            noise_r = random.gauss(0, 0.12 * rows)
-            noise_c = random.gauss(0, 0.12 * cols)
-            continuous_targets[name] = (max(0.0, min(rows - 1, r_t + noise_r)), max(0.0, min(cols - 1, c_t + noise_c)))
-            unassigned_idx += 1
+            target_col = ((target_index / max(1, total_unassigned - 1)) * (cols - 1)
+                          if total_unassigned > 1 else (cols - 1) / 2.0)
+            continuous_targets[name] = (height_to_row(student[2]), target_col)
+            target_index += 1
 
-        # 初始解：对非小团体学生进行按身高分桶并随机化，以增加多样性
+        group_members = set(member for group in (groups or []) for member in group)
+        placement_order = [s for s in students if s[1] in group_members]
+        non_group_students = [s for s in students
+                              if s[1] not in group_members
+                              and s[1] not in (reserved_seats or {})]
+        random.shuffle(non_group_students)
+        placement_order.extend(non_group_students)
         current_solution = [row[:] for row in initial_seating]
-        # 识别小团体成员集合
-        group_members = set(m for g in (groups or []) for m in g)
-
-        # 非小团体且非预留学生列表（按身高排序）
-        non_group_students = [s for s in students if s[1] not in group_members and s[1] not in (reserved_seats or {})]
-        # 将非小团体学生按身高分桶（宽度 5）并在桶内随机打乱，允许在相近身高中交换
-        buckets = {}
-        for s in non_group_students:
-            h = s[2]
-            key = int(h // 5)
-            buckets.setdefault(key, []).append(s)
-        shuffled_non_group = []
-        for key in sorted(buckets.keys()):
-            bucket = buckets[key][:]
-            random.shuffle(bucket)
-            shuffled_non_group.extend(bucket)
-
-        # 合并需要先放置的小团体学生（保持先插入，但不会在优化阶段被随意移动）与经过随机化的非小团体学生
-        placement_order = []
-        # 先放置小团体学生以便保留分布形状
-        for s in students:
-            if s[1] in group_members:
-                placement_order.append(s)
-        # 再放置非小团体（随机化后的）
-        placement_order.extend(shuffled_non_group)
-
-        # 将每个未分配的学生按 placement_order 放置到最近的空位
-        for s in placement_order:
-            name = s[1]
+        for student in placement_order:
+            name = student[1]
             if name in assigned_students:
                 continue
-            empty_positions = [(i, j) for i in range(rows) for j in range(cols) if current_solution[i][j] == '空']
-            if not empty_positions:
+            available = [(i, j) for i in range(rows) for j in range(cols)
+                         if current_solution[i][j] == '空']
+            if not available:
                 break
-            r_t, c_t = continuous_targets.get(name, (rows // 2, cols // 2))
-            # 使用欧氏距离选择最近空位，但随机选择 top-k 来提升随机性
-            dists = [(p, (p[0] - r_t) ** 2 + (p[1] - c_t) ** 2) for p in empty_positions]
-            dists.sort(key=lambda x: x[1])
-            k = max(1, min(5, len(dists)//10 + 1))
-            top_k = [p for p, _ in dists[:k]]
-            pos_choice = random.choice(top_k)
-            current_solution[pos_choice[0]][pos_choice[1]] = name
+            target = continuous_targets.get(name, ((rows - 1) / 2.0, (cols - 1) / 2.0))
+            available.sort(key=lambda p: (p[0] - target[0]) ** 2 + (p[1] - target[1]) ** 2)
+            position = random.choice(available[:max(1, min(5, len(available)))])
+            current_solution[position[0]][position[1]] = name
             assigned_students.add(name)
 
-        # 能量函数：平衡身高偏差能量与小团体分散（或聚合）能量
-        def get_positions_map(sol):
-            pos = {}
-            for i in range(rows):
-                for j in range(cols):
-                    student = sol[i][j]
-                    if student not in ['空', '预留空位']:
-                        pos[student] = (i, j)
-            return pos
+        def get_positions_map(solution):
+            return {(student, (i, j))
+                    for i, row in enumerate(solution)
+                    for j, student in enumerate(row)
+                    if student not in ('空', '预留空位')}
 
-        def energy(sol, temperature=1.0):
-            pos = get_positions_map(sol)
-            # 身高能量：平方误差
-            height_energy = 0.0
-            for s in students:
-                name = s[1]
-                if name in pos:
-                    r_t, c_t = continuous_targets.get(name, (0.0, 0.0))
-                    i, j = pos[name]
-                    height_energy += (i - r_t) ** 2
+        def energy(solution):
+            positions = dict(get_positions_map(solution))
+            height_energy = sum(
+                (positions[name][0] - continuous_targets.get(name, (0.0, 0.0))[0]) ** 2
+                for _, name, _ in students if name in positions
+            )
+            # 显式惩罚身高次序倒置：行号越大表示越靠后，后排不应比前排矮。
+            height_order_energy = 0.0
+            positioned_students = [student for student in students if student[1] in positions]
+            for index, (_, first, first_height) in enumerate(positioned_students):
+                for _, second, second_height in positioned_students[index + 1:]:
+                    first_row = positions[first][0]
+                    second_row = positions[second][0]
+                    if first_height < second_height and first_row > second_row:
+                        height_order_energy += (first_row - second_row) ** 2
+                    elif first_height > second_height and first_row < second_row:
+                        height_order_energy += (second_row - first_row) ** 2
 
-            # 小团体能量：优先惩罚成员对不满足接近距离的对（manhattan > 1），其次为分布均匀性
             group_energy = 0.0
-            for g in (groups or []):
-                members = [m for m in g if m in pos]
-                if len(members) <= 1:
-                    continue
-                dists = []
-                adjacency_violations = 0
-                for a in range(len(members)):
-                    for b in range(a + 1, len(members)):
-                        p1 = pos[members[a]]
-                        p2 = pos[members[b]]
-                        # 使用曼哈顿距离判断是否相邻
-                        manh = abs(p1[0]-p2[0]) + abs(p1[1]-p2[1])
-                        if manh > 1:
-                            adjacency_violations += 1
-                        d = (p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2
-                        dists.append(d)
-                if dists:
-                    # 目标距离针对当前教室尺度与小团体规模可适配
-                    target_d = max(1.0, ((rows - 1) ** 2 + (cols - 1) ** 2) / max(4.0, 4.0 * len(members)))
-                    variance_penalty = sum((dd - target_d) ** 2 for dd in dists) / len(dists)
-                    # 强化惩罚：每个 adjacency violation 增加大 penalty
-                    group_energy += variance_penalty + adjacency_violations * 10.0
-
-            # 归一化项，避免规模问题
+            for group in (groups or []):
+                members = [name for name in group if name in positions]
+                pair_distances = []
+                for index, first in enumerate(members):
+                    for second in members[index + 1:]:
+                        p1, p2 = positions[first], positions[second]
+                        manhattan = abs(p1[0] - p2[0]) + abs(p1[1] - p2[1])
+                        pair_distances.append(manhattan)
+                if pair_distances:
+                    # 距离越大惩罚越小；相邻或同座位区域会受到额外惩罚。
+                    max_distance = max(1.0, rows + cols - 2)
+                    group_energy += sum(
+                        1.0 - min(distance, max_distance) / max_distance
+                        for distance in pair_distances
+                    ) / len(pair_distances)
+                    group_energy += sum(5.0 for distance in pair_distances if distance <= 1)
             height_norm = height_energy / (rows ** 2 + 1)
-            group_norm = group_energy / (max(1, (rows ** 2 + cols ** 2)))
+            height_order_norm = height_order_energy / (rows ** 2 + 1)
+            group_norm = group_energy / max(1, rows ** 2 + cols ** 2)
+            return 0.4 * height_norm + 0.3 * height_order_norm + 0.3 * group_norm
 
-            temp_factor = max(0.01, min(1.0, temperature))
-            w_height_temp = 1.0 * (1.0 - 0.6 * (1 - temp_factor))
-            w_group_temp = 1.0 * (0.8 + 0.2 * (1 - temp_factor))
-            S = w_height_temp + w_group_temp
+        # 小团体也必须能够移动，否则分散奖励无法真正改变其座位。
+        movable_names = [s[1] for s in students if s[1] not in (reserved_seats or {})]
+        action_count = max(1, len(movable_names) * (len(movable_names) - 1) // 2)
+        feature_size = 6
+        model_version = 2
+        model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  "rl_models", "seat_q_policy.npz")
+        os.makedirs(os.path.dirname(model_path), exist_ok=True)
+        weights = np.zeros(feature_size, dtype=np.float64)
+        loaded_model = False
+        if os.path.exists(model_path):
+            loaded = np.load(model_path)
+            if (loaded.get("model_version", np.array(0)).item() == model_version
+                    and loaded.get("weights", np.empty(0)).shape == (feature_size,)):
+                weights = loaded["weights"].astype(np.float64)
+                loaded_model = True
 
-            w_group = S / 2
-            w_height = w_group
+        def candidate_actions(solution):
+            positions = dict(get_positions_map(solution))
+            pairs = [(movable_names[i], movable_names[j])
+                     for i in range(len(movable_names))
+                     for j in range(i + 1, len(movable_names))
+                     if movable_names[i] in positions and movable_names[j] in positions]
+            random.shuffle(pairs)
+            return pairs[:min(96, len(pairs))]
 
-            return w_height * height_norm + w_group * group_norm
+        def apply_swap(solution, first, second):
+            positions = dict(get_positions_map(solution))
+            result = [row[:] for row in solution]
+            p1, p2 = positions[first], positions[second]
+            result[p1[0]][p1[1]], result[p2[0]][p2[1]] = result[p2[0]][p2[1]], result[p1[0]][p1[1]]
+            return result
 
-        # 模拟退火优化（交换两个非预留学生）
-        current_energy = energy(current_solution, temperature=1.0)
-        best_solution = [row[:] for row in current_solution]
-        best_energy = current_energy
+        def action_features(current_energy, next_energy, first, second):
+            height_gap = abs(
+                next(s[2] for s in students if s[1] == first)
+                - next(s[2] for s in students if s[1] == second)
+            ) / max(1.0, max_height - min_height)
+            delta = next_energy - current_energy
+            return np.array([1.0, current_energy, next_energy, delta, height_gap, delta * delta], dtype=np.float64)
 
-        # 使用多次随机重启 + 多种邻域操作以提高结果多样性与收敛性
-        T = 1.0
-        T_min = 1e-4
-        alpha = 0.993
-        max_iters = 8000
-        restarts = 3
+        def select_action(solution, current_energy, epsilon):
+            actions = candidate_actions(solution)
+            if not actions:
+                return None
+            scored = []
+            for first, second in actions:
+                candidate = apply_swap(solution, first, second)
+                candidate_energy = energy(candidate)
+                features = action_features(current_energy, candidate_energy, first, second)
+                scored.append((float(np.dot(weights, features)), first, second, candidate, candidate_energy, features))
+            if random.random() < epsilon:
+                return random.choice(scored)
+            return max(scored, key=lambda item: item[0])
 
-        best_overall = [row[:] for row in current_solution]
-        best_overall_energy = energy(best_overall, temperature=T)
-
-        for restart in range(restarts):
-            # 每次重启增加微小扰动到 continuous targets 的位置
-            perturbed_targets = {k: (v[0] + random.gauss(0, 0.2), v[1] + random.gauss(0, 0.2)) for k, v in continuous_targets.items()}
-            # 重新创建当前解为初始放置（使用 perturbed_targets 的近邻策略）
-            cur = [row[:] for row in initial_seating]
-            assigned = set([s for s in (reserved_seats or {}).keys()])
-            # 简单的重放置：按 placement_order，但优先使用 perturbed_targets
-            for s in placement_order:
-                name = s[1]
-                if name in assigned:
-                    continue
-                empty_positions = [(i, j) for i in range(rows) for j in range(cols) if cur[i][j] == '空']
-                if not empty_positions:
+        # 没有模型时先用较短的离线 Q-learning 预训练；已有参数则小步微调。
+        training_episodes = 12 if np.any(weights) else 24
+        print(
+            f"[RL] Training started ({'fine-tuning' if loaded_model else 'first run'}), "
+            f"episodes={training_episodes}, actions={action_count}",
+            flush=True,
+        )
+        for episode in range(training_episodes):
+            state = [row[:] for row in current_solution]
+            state_energy = energy(state)
+            episode_steps = min(120, max(12, action_count))
+            for _ in range(episode_steps):
+                selected = select_action(state, state_energy, epsilon=0.25)
+                if selected is None:
                     break
-                r_t, c_t = perturbed_targets.get(name, (rows // 2, cols // 2))
-                dists = [(p, (p[0] - r_t) ** 2 + (p[1] - c_t) ** 2) for p in empty_positions]
-                dists.sort(key=lambda x: x[1])
-                k = max(1, min(5, len(dists)//10 + 1))
-                top_k = [p for p, _ in dists[:k]]
-                pos_choice = random.choice(top_k)
-                cur[pos_choice[0]][pos_choice[1]] = name
-                assigned.add(name)
+                _, first, second, next_state, next_energy, features = selected
+                reward = state_energy - next_energy
+                next_selected = select_action(next_state, next_energy, epsilon=0.0)
+                next_value = (next_selected[0] if next_selected else 0.0)
+                target = reward + 0.85 * next_value
+                weights += 0.03 * (target - float(np.dot(weights, features))) * features
+                state, state_energy = next_state, next_energy
+            print(
+                f"[RL] Training progress: {episode + 1}/{training_episodes}, "
+                f"energy={state_energy:.4f}",
+                flush=True,
+            )
+        np.savez(model_path, weights=weights, feature_size=feature_size,
+                 model_version=model_version)
+        print(f"[RL] Model saved: {model_path}", flush=True)
 
-            cur_energy = energy(cur, temperature=T)
-            current = [row[:] for row in cur]
-            current_energy = cur_energy
-
-            non_group_list = [s[1] for s in students if s[1] not in group_members and s[1] not in (reserved_seats or {})]
-
-            iter_count = 0
-            while T > T_min and iter_count < max_iters:
-                iter_count += 1
-                # 邻域操作：swap 或 move
-                if random.random() < 0.7 and len(non_group_list) >= 2:
-                    # 尝试选择身高相近的候选以便改善身高序列
-                    a = random.choice(non_group_list)
-                    ha = next((s[2] for s in students if s[1] == a), 0)
-                    close = [sname for sname in non_group_list if sname != a and abs(next((s[2] for s in students if s[1] == sname), 0) - ha) <= 5]
-                    if close and random.random() < 0.7:
-                        b = random.choice(close)
-                    else:
-                        b = random.choice([x for x in non_group_list if x != a])
-                    pos_map = get_positions_map(current)
-                    pa = pos_map.get(a)
-                    pb = pos_map.get(b)
-                    if not pa or not pb:
-                        T *= alpha
-                        continue
-                    new_sol = [row[:] for row in current]
-                    new_sol[pa[0]][pa[1]], new_sol[pb[0]][pb[1]] = new_sol[pb[0]][pb[1]], new_sol[pa[0]][pa[1]]
-                else:
-                    # move: 将某个非小团体学生移动到随机可用位置（扩大邻域）
-                    cand = random.choice(non_group_list) if non_group_list else None
-                    if not cand:
-                        T *= alpha
-                        continue
-                    pos_map = get_positions_map(current)
-                    p_old = pos_map.get(cand)
-                    empties = [(i, j) for i in range(rows) for j in range(cols) if current[i][j] == '空']
-                    if not p_old or not empties:
-                        T *= alpha
-                        continue
-                    p_new = random.choice(empties)
-                    new_sol = [row[:] for row in current]
-                    new_sol[p_new[0]][p_new[1]] = cand
-                    new_sol[p_old[0]][p_old[1]] = '空'
-
-                new_e = energy(new_sol, temperature=T)
-                delta = new_e - current_energy
-                if delta < 0 or random.random() < math.exp(-delta / max(1e-6, T)):
-                    current = new_sol
-                    current_energy = new_e
-                    if current_energy < best_overall_energy:
-                        best_overall_energy = current_energy
-                        best_overall = [row[:] for row in current]
-
-                T *= alpha
-
-            # 结束一次重启，将温度重置再试下一次
-            T = 1.0
-
-        seating_arrangement = best_overall
+        best_solution = [row[:] for row in current_solution]
+        best_energy = energy(best_solution)
+        state = [row[:] for row in current_solution]
+        state_energy = best_energy
+        optimization_steps = min(240, max(24, action_count * 2))
+        print(f"[RL] Inference optimization started: steps={optimization_steps}", flush=True)
+        for step in range(optimization_steps):
+            selected = select_action(state, state_energy, epsilon=0.05)
+            if selected is None:
+                break
+            _, _, _, next_state, next_energy, _ = selected
+            state, state_energy = next_state, next_energy
+            if state_energy < best_energy:
+                best_solution = [row[:] for row in state]
+                best_energy = state_energy
+            if (step + 1) % 20 == 0 or step + 1 == optimization_steps:
+                print(
+                    f"[RL] Inference progress: {step + 1}/{optimization_steps}, "
+                    f"best_energy={best_energy:.4f}",
+                    flush=True,
+                )
+        seating_arrangement = best_solution
 
 #######################################################################################################################################################
 
