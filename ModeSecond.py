@@ -5,7 +5,7 @@ import AlgorithmFunctions
 from AlgorithmFunctions import load_json_files, import_json_config, save_image_and_get_path
 from GradioFunctions import generate_page, if_and_ud2
 
-with gr.Blocks(title="配置文件直接导入模式", css=".gradio-textarea { height: auto; overflow: visible; }") as demo:
+with gr.Blocks(title="配置文件直接导入模式") as demo:
         gr.Markdown("**社交的班委 暗黑座位学 食人师 ~ 欢迎使用班级座位排列工具** *Powered by Jiang*")
         gr.Markdown("此界面为配置文件直接导入模式，如果在主界面更改了模式，那么此界面会改变")
 
@@ -298,4 +298,4 @@ with gr.Blocks(title="配置文件直接导入模式", css=".gradio-textarea { h
             outputs=save_config_output
         )
 
-demo.launch()
+demo.launch(css=".gradio-textarea { height: auto; overflow: visible; }")

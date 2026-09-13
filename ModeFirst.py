@@ -6,7 +6,7 @@ from GradioFunctions import optimization_mode_page, mode_selection_page, optimiz
 from GradioFunctions import get_initial_data, show_reservation_input, show_group_input, show_target_teams_input
 from GradioFunctions import if_and_ud1, if_and_ud2
 
-with gr.Blocks(title="自定义输入模式", css=".gradio-textarea { height: auto; overflow: visible; }") as demo:
+with gr.Blocks(title="自定义输入模式") as demo:
     gr.Markdown("**社交的班委 暗黑座位学 食人师 ~ 欢迎使用班级座位排列工具** *Powered by Jiang*")
     gr.Markdown("此界面为自定义输入模式，如果在主界面更改了模式，那么此界面会改变")
     
@@ -527,4 +527,4 @@ with gr.Blocks(title="自定义输入模式", css=".gradio-textarea { height: au
                 outputs=save_config_output
             )
 
-demo.launch()
+demo.launch(css=".gradio-textarea { height: auto; overflow: visible; }")

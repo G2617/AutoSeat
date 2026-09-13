@@ -7,6 +7,7 @@ import tempfile
 import datetime
 import io
 import os
+import hashlib
 from matplotlib.colors import LinearSegmentedColormap
 from PIL import Image, ImageDraw, ImageFont
 from AlgorithmFunctions import manhattan_distance, generate_unique_abbreviation
@@ -236,6 +237,19 @@ def generate_seating_arrangement(num_students, rows, cols, students_data, enable
                         height_order_energy += (first_row - second_row) ** 2
                     elif first_height > second_height and first_row < second_row:
                         height_order_energy += (second_row - first_row) ** 2
+            row_heights = []
+            for row_index in range(rows):
+                heights_in_row = [
+                    next(student[2] for student in students if student[1] == name)
+                    for name, (row, _) in positions.items() if row == row_index
+                ]
+                if heights_in_row:
+                    row_heights.append((row_index, sum(heights_in_row) / len(heights_in_row)))
+            row_profile_energy = sum(
+                max(0.0, previous_height - next_height) ** 2
+                for (_, previous_height), (_, next_height)
+                in zip(row_heights, row_heights[1:])
+            )
 
             group_energy = 0.0
             for group in (groups or []):
@@ -256,16 +270,29 @@ def generate_seating_arrangement(num_students, rows, cols, students_data, enable
                     group_energy += sum(5.0 for distance in pair_distances if distance <= 1)
             height_norm = height_energy / (rows ** 2 + 1)
             height_order_norm = height_order_energy / (rows ** 2 + 1)
+            row_profile_norm = row_profile_energy / max(1.0, (max_height - min_height) ** 2)
             group_norm = group_energy / max(1, rows ** 2 + cols ** 2)
-            return 0.4 * height_norm + 0.3 * height_order_norm + 0.3 * group_norm
+            return (
+                0.25 * height_norm
+                + 0.25 * height_order_norm
+                + 0.20 * row_profile_norm
+                + 0.30 * group_norm
+            )
 
         # 小团体也必须能够移动，否则分散奖励无法真正改变其座位。
         movable_names = [s[1] for s in students if s[1] not in (reserved_seats or {})]
         action_count = max(1, len(movable_names) * (len(movable_names) - 1) // 2)
         feature_size = 6
-        model_version = 2
-        model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                  "rl_models", "seat_q_policy.npz")
+        model_version = 3
+        config_signature = repr((
+            num_students, rows, cols, students_data, enable_optimization, mode,
+            teams, sorts, groups, reserved_seats
+        )).encode("utf-8")
+        config_hash = hashlib.sha256(config_signature).hexdigest()[:16]
+        model_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "rl_models", f"seat_q_policy_{config_hash}.npz"
+        )
         os.makedirs(os.path.dirname(model_path), exist_ok=True)
         weights = np.zeros(feature_size, dtype=np.float64)
         loaded_model = False
@@ -314,8 +341,8 @@ def generate_seating_arrangement(num_students, rows, cols, students_data, enable
                 return random.choice(scored)
             return max(scored, key=lambda item: item[0])
 
-        # 没有模型时先用较短的离线 Q-learning 预训练；已有参数则小步微调。
-        training_episodes = 12 if np.any(weights) else 24
+        # 每个配置独立训练，避免不同班级的奖励分布相互污染。
+        training_episodes = 40 if loaded_model else 80
         print(
             f"[RL] Training started ({'fine-tuning' if loaded_model else 'first run'}), "
             f"episodes={training_episodes}, actions={action_count}",
@@ -324,7 +351,7 @@ def generate_seating_arrangement(num_students, rows, cols, students_data, enable
         for episode in range(training_episodes):
             state = [row[:] for row in current_solution]
             state_energy = energy(state)
-            episode_steps = min(120, max(12, action_count))
+            episode_steps = min(400, max(60, action_count * 2))
             for _ in range(episode_steps):
                 selected = select_action(state, state_energy, epsilon=0.25)
                 if selected is None:
@@ -349,7 +376,7 @@ def generate_seating_arrangement(num_students, rows, cols, students_data, enable
         best_energy = energy(best_solution)
         state = [row[:] for row in current_solution]
         state_energy = best_energy
-        optimization_steps = min(240, max(24, action_count * 2))
+        optimization_steps = min(800, max(120, action_count * 4))
         print(f"[RL] Inference optimization started: steps={optimization_steps}", flush=True)
         for step in range(optimization_steps):
             selected = select_action(state, state_energy, epsilon=0.05)
