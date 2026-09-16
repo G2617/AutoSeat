@@ -1,19 +1,12 @@
-# Python 缓存
-/__pycache__/
-
-# 虚拟环境
-/.venv/
-/venv/
-/env/
-/ENV/
-
-# 环境变量与密钥
+__pycache__/
+.venv/
+venv/
+env/
+ENV/
 .env
 .env.*
 !.env.example
-
-# IDE / 编辑器
-/.idea/
-/.vscode/
+.idea/
+.vscode/
 *.swp
 .DS_Store
