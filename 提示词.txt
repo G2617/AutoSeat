@@ -1,1 +1,0 @@
-现在处在的工作区是一个座位排列的python gradio界面实现程序。请着重更改当前展现的GenerateSeats.py文件的elif mode == 0 and enable_optimization:部分（line153-424）。此部分使用模拟退火算法，但函数不连续导致效果不理想。因此，请给我替换为预训练的强化学习算法，模型参数文件进行本地保存，奖励函数参照能量函数部分，权重待调。注意代码整体的返回值和通信逻辑。最后请告诉我你的最终实现方法和奖励函数逻辑。python路径为miniconda虚拟环境C:\Users\JiangCarrey\AppData\Local\miniconda\envs\python311\python.exe
