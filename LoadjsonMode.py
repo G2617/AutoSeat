@@ -6,7 +6,7 @@ from AlgorithmFunctions import load_json_files, import_json_config, save_image_a
 from GradioFunctions import generate_page, if_and_ud2
 
 with gr.Blocks(title="配置文件直接导入模式") as demo:
-        gr.Markdown("**社交的班委 暗黑座位学 食人师 ~ 欢迎使用班级座位排列工具** *Powered by Jiang*")
+        gr.Markdown("**欢迎使用班级座位排列工具** *Powered by Jiang*")
         gr.Markdown("此界面为配置文件直接导入模式，如果在主界面更改了模式，那么此界面会改变")
 
         rows_output = gr.State()

@@ -45,11 +45,11 @@ def start_selected_mode():
     current_directory = os.path.dirname(current_script_path)
     script_name = ""
     if MAINMODE == 1:
-        script_name = "ModeFirst.py"
+        script_name = "CustomizeMode.py"
     elif MAINMODE == 2:
-        script_name = "ModeSecond.py"
+        script_name = "LoadjsonMode.py"
     elif MAINMODE == 3:
-        script_name = "ModeThird.py"
+        script_name = "EditjsonMode.py"
     elif MAINMODE == 4:
         script_name = "ImageFunctions.py"
 
@@ -74,7 +74,7 @@ def read_process_output(process):
 
 with gr.Blocks(title="班级座位排列工具") as demo:
     gr.Info("工具页面启动成功")
-    gr.Markdown("**社交的班委 暗黑座位学 食人师 ~ 欢迎使用班级座位排列工具** *Powered by Jiang*")
+    gr.Markdown("**欢迎使用班级座位排列工具** *Powered by Jiang*")
     gr.Markdown("此界面为主界面，可以在下方选择模式")
     use_mode_input = gr.Dropdown(choices=["自定义输入", "配置文件直接导入", "配置文件编辑", "快捷图片输入"], label="使用模式选择", value="自定义输入")
     gr.Markdown("**首次使用工具请选择自定义输入模式以了解基础设置项**")

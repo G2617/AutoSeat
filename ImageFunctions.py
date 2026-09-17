@@ -308,7 +308,7 @@ def main():
     with gr.Blocks(title="快捷图片输入辅助模式") as demo:
         all_marks_state = gr.State(None)
         total_steps_state = gr.State(1)  #总台阶数
-        gr.Markdown("**社交的班委 暗黑座位学 食人师 ~ 欢迎使用班级座位排列辅助图片输入工具** *Powered by Jiang*")
+        gr.Markdown("**欢迎使用班级座位排列辅助图片输入工具** *Powered by Jiang*")
         gr.Markdown("此界面为快捷图片输入辅助模式，如果在主界面更改了模式，那么此界面会改变")
         gr.Markdown("\n**请选择需要程序目录下导入的图片** 导入图片必须为班级合照，人脸尽量无遮挡，学生脚部在画面中，画面水平且透视效果较小")
         image_selector = gr.Dropdown(choices=image_names, label="请选择图片文件", interactive=True)
