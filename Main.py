@@ -54,7 +54,17 @@ def start_selected_mode():
         script_name = "ImageFunctions.py"
 
     script_path = os.path.join(current_directory, script_name)
-    process = subprocess.Popen([python, script_path], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    child_env = os.environ.copy()
+    child_env["PYTHONIOENCODING"] = "utf-8"
+    process = subprocess.Popen(
+        [python, script_path],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=child_env,
+    )
     processes.append(process)  # 存储子进程
 
     # 启动一个线程来读取子进程的输出
@@ -108,4 +118,4 @@ if __name__ == "__main__":
     try:
         demo.launch(server_port=7860, share=True, pwa=True)
     except:
-        raise ValueError("人脸工具启动失败，请确保本地端口7860未被占用")
+        raise ValueError("人脸工具启动失败，请确保 localhost:7860 未被占用")

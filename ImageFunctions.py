@@ -28,6 +28,15 @@ posture_scores = {
 print("正在启动人脸检测工具...")
 
 
+def ensure_slider_range(minimum, maximum):
+    """Return bounds accepted by Gradio, including for degenerate image ranges."""
+    minimum = int(minimum)
+    maximum = int(maximum)
+    if maximum <= minimum:
+        maximum = minimum + 1
+    return minimum, maximum
+
+
 def find_images_in_dir():
     """查找程序源文件所在目录下的所有图片文件"""
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -43,7 +52,14 @@ def find_images_in_dir():
 def detect_faces(image_path):
     """使用MTCNN模型检测人脸并缓存结果"""
     global cached_image, cached_face_locations, cached_face_landmarks, cached_face_images
-    image = cv2.imread(image_path)
+    if not image_path or not os.path.isfile(image_path):
+        raise gr.Error(f"找不到图片文件 {image_path}")
+
+    # Use byte decoding so paths containing non-ASCII characters work on Windows.
+    image_data = np.fromfile(image_path, dtype=np.uint8)
+    image = cv2.imdecode(image_data, cv2.IMREAD_COLOR)
+    if image is None:
+        raise gr.Error(f"无法读取图片文件，请确认文件格式有效 {image_path}")
     image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)  # 将BGR转换为RGB
 
     detector = MTCNN()
@@ -303,7 +319,8 @@ def draw_calibration_line(img, line_y):
 def main():
     # 预加载图片
     images = find_images_in_dir()
-    image_names = [os.path.basename(img) for img in images]
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    image_names = [os.path.relpath(img, script_dir) for img in images]
 
     with gr.Blocks(title="快捷图片输入辅助模式") as demo:
         all_marks_state = gr.State(None)
@@ -363,7 +380,7 @@ def main():
                 gr.Markdown("请调整滑杆直到图片中红线紧贴最前面同学的脚尖，即首个台阶位置")
                 calibration_slider = gr.Slider(
                     minimum=0,
-                    maximum=0,
+                    maximum=1,
                     step=1,
                     label="身高校准线位置",
                     info="拖动滑杆调整水平校准线位置"
@@ -373,7 +390,7 @@ def main():
                 gr.Markdown("请设置台阶高度间隔")
                 step_interval_slider = gr.Slider(
                     minimum=0,
-                    maximum=0,
+                    maximum=1,
                     step=1,
                     label="台阶高度间隔",
                     info="根据台阶数自动计算范围",
@@ -388,8 +405,12 @@ def main():
         def update_face_selector(image_path):
             """选择图片后更新聚类结果，并显示对应行数的输入组件"""
             global cached_image, cached_face_locations, cached_face_landmarks, cached_face_images
+            if not image_path:
+                raise gr.Error("请先选择图片文件")
             gr.Info("图片导入成功，请等待识别")
-            full_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), image_path)
+            full_path = image_path if os.path.isabs(image_path) else os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), image_path
+            )
             detect_faces(full_path)
             all_boxes_img = draw_all_boxes()  # 全标注图片（含人脸框和序号）
             all_faces_img = show_all_faces()
@@ -407,7 +428,7 @@ def main():
                 *step_values,
                 n_clusters,
                 visible_rows,
-                gr.update(maximum=img_height),
+                gr.update(maximum=max(img_height, 1)),
                 all_boxes_img,  # 校准视图初始底图改为全标注图片（关键修改）
                 all_boxes_img   # 输出到all_marks_state缓存全标注图（关键修改）
             )
@@ -440,13 +461,15 @@ def main():
             base_line_y = base_line_y[0] if isinstance(base_line_y, (tuple, list)) else base_line_y
             if total_steps == 1:
                 gr.Info("台阶数为1，无需设置间隔")
-                return gr.update(visible=True, minimum=img_height//100, maximum=img_height//100, interactive=False, value=img_height//100)  # 仅返回滑杆更新
+                min_interval, max_interval = ensure_slider_range(img_height // 100, img_height // 100)
+                return gr.update(visible=True, minimum=min_interval, maximum=max_interval, interactive=False, value=min_interval)  # 仅返回滑杆更新
             if not isinstance(base_line_y, (int, float)) or base_line_y is None:
                 raise gr.Error("请先确认基准线位置")
                 return gr.update(visible=False)  # 仅返回滑杆更新
             
             min_interval = img_height // 100
             max_interval = int(base_line_y) // (total_steps - 1)
+            min_interval, max_interval = ensure_slider_range(min_interval, max_interval)
             return gr.update(visible=True, minimum=min_interval, maximum=max_interval, interactive=True)  # 仅返回滑杆更新
 
         def draw_step_lines(all_marks_img, base_line_y, interval, total_steps):
@@ -558,7 +581,7 @@ def main():
                 submit_inputs(visible_rows, steps, *all_inputs),  # 原有数据提交逻辑
                 gr.update(visible=True),  # 显示校准组件
                 cached_image.copy() if cached_image is not None else None,  # 初始化校准视图
-                cached_image.shape[0] if cached_image is not None else 0  # 设置滑杆最大值
+                max(cached_image.shape[0], 1) if cached_image is not None else 1  # 设置滑杆最大值
             ),
             inputs=[
                 visible_rows_state, total_steps_input,
