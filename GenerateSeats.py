@@ -16,6 +16,107 @@ from AlgorithmFunctions import manhattan_distance, generate_unique_abbreviation
 from Debugging import log_record, debug
 
 
+RL_CPU_RATIO = 0.45
+RL_MAX_WORKERS = 6
+GROUP_HEIGHT_WEIGHT = 5.0
+
+
+def _rl_worker_count(task_count):
+    """Limit RL process fan-out so the UI remains responsive."""
+    cpu_count = os.cpu_count() or 1
+    return max(1, min(task_count, RL_MAX_WORKERS, int(cpu_count * RL_CPU_RATIO) or 1))
+
+
+def _group_candidate_energy(seating, height_by_name, new_teams, groups, rows, cols):
+    positions = {
+        name: (row, col)
+        for row, values in enumerate(seating)
+        for col, name in enumerate(values)
+        if name not in ('空', '预留空位')
+    }
+    height_penalty = 0.0
+    height_gradient_penalty = 0.0
+    for members in new_teams:
+        placed = [name for name in members if name in positions]
+        for index, first in enumerate(placed):
+            for second in placed[index + 1:]:
+                row_gap = positions[first][0] - positions[second][0]
+                height_gap = height_by_name[first] - height_by_name[second]
+                if row_gap * height_gap < 0:
+                    height_penalty += abs(row_gap * height_gap) ** 1.25
+        rows_with_heights = {}
+        for name in placed:
+            rows_with_heights.setdefault(positions[name][0], []).append(
+                height_by_name[name]
+            )
+        row_profile = [
+            (row, sum(heights) / len(heights))
+            for row, heights in sorted(rows_with_heights.items())
+        ]
+        for (_, previous_height), (_, following_height) in zip(
+            row_profile, row_profile[1:]
+        ):
+            if previous_height > following_height:
+                height_gradient_penalty += previous_height - following_height
+    connectivity_penalty = 0.0
+    for members in new_teams:
+        placed = [positions[name] for name in members if name in positions]
+        if len(placed) < 2:
+            continue
+        remaining = set(placed)
+        components = 0
+        adjacent_edges = 0
+        while remaining:
+            components += 1
+            frontier = [remaining.pop()]
+            while frontier:
+                current = frontier.pop()
+                neighbors = {
+                    position for position in remaining
+                    if manhattan_distance(position, current) == 1
+                }
+                adjacent_edges += len(neighbors)
+                remaining.difference_update(neighbors)
+                frontier.extend(neighbors)
+        pair_count = max(1, len(placed) * (len(placed) - 1) // 2)
+        connectivity_penalty += 35.0 * max(0, components - 1)
+        connectivity_penalty += 2.5 * max(0, len(placed) - 1 - adjacent_edges)
+        connectivity_penalty += sum(
+            min(
+                manhattan_distance(position, other)
+                for other in placed if other != position
+            )
+            for position in placed
+        ) / max(1, len(placed))
+        bounding_area = (
+            max(position[0] for position in placed)
+            - min(position[0] for position in placed) + 1
+        ) * (
+            max(position[1] for position in placed)
+            - min(position[1] for position in placed) + 1
+        )
+        connectivity_penalty += 0.8 * max(0, bounding_area - len(placed))
+        connectivity_penalty -= 1.5 * adjacent_edges / pair_count
+
+    group_penalty = 0.0
+    for group in groups or []:
+        placed = [name for name in group if name in positions]
+        for index, first in enumerate(placed):
+            for second in placed[index + 1:]:
+                distance = manhattan_distance(positions[first], positions[second])
+                group_penalty += 1.0 / (1.0 + distance)
+                if distance <= 1:
+                    group_penalty += 2.0
+    return (
+        GROUP_HEIGHT_WEIGHT * (
+            height_penalty / max(1, rows ** 2)
+            + height_gradient_penalty / max(1.0, rows * 100.0)
+        )
+        + connectivity_penalty
+        + group_penalty
+    )
+
+
 def _train_q_episode(payload):
     """Train one independent episode in a separate process."""
     (initial_solution, students, continuous_targets, groups, rows, cols,
@@ -482,15 +583,16 @@ def generate_seating_arrangement(num_students, rows, cols, students_data, enable
             return max(scored, key=lambda item: item[0])
 
         # 每个配置独立训练，避免不同班级的奖励分布相互污染。
-        training_episodes = 8 if loaded_model else 80
+        training_episodes = 6 if loaded_model else 48
+        worker_count = _rl_worker_count(training_episodes)
         print(
             f"[RL] Training started ({'fine-tuning' if loaded_model else 'first run'}), "
             f"episodes={training_episodes}, actions={action_count}, "
-            f"workers={min(os.cpu_count() or 1, training_episodes, 8)}",
+            f"workers={worker_count}, total_tasks={training_episodes}, "
+            f"completed=0/{training_episodes} (0%)",
             flush=True,
         )
 
-        worker_count = min(os.cpu_count() or 1, training_episodes, 8)
         worker_payload = (
             current_solution, students, continuous_targets, groups, rows, cols,
             movable_names, weights, max_height, min_height, action_count
@@ -504,10 +606,12 @@ def generate_seating_arrangement(num_students, rows, cols, students_data, enable
             for episode, future in enumerate(as_completed(futures), start=1):
                 episode_results.append(future.result())
                 energies = [result[1] for result in episode_results]
+                completion = episode * 100 / training_episodes
                 print(
                     f"[RL] Training progress: {episode}/{training_episodes}, "
                     f"current={energies[-1]:.4f}, mean={np.mean(energies):.4f}, "
-                    f"best={min(energies):.4f}",
+                    f"best={min(energies):.4f}, completed={episode}/"
+                    f"{training_episodes} ({completion:.1f}%)",
                     flush=True,
                 )
 
@@ -516,6 +620,13 @@ def generate_seating_arrangement(num_students, rows, cols, students_data, enable
         weights = best_training_result[0]
         np.savez(model_path, weights=weights, feature_size=feature_size,
                  model_version=model_version, config_hash=config_hash)
+        print(
+            f"[RL] Finished: tasks={training_episodes}, "
+            f"best_energy={best_training_result[1]:.4f}, "
+            f"mean_energy={np.mean([result[1] for result in episode_results]):.4f}, "
+            f"completed={training_episodes}/{training_episodes} (100%)",
+            flush=True,
+        )
         print(f"[RL] Model saved: {model_path}", flush=True)
 
         best_solution = [row[:] for row in best_training_result[2]]
@@ -545,178 +656,157 @@ def generate_seating_arrangement(num_students, rows, cols, students_data, enable
 #######################################################################################################################################################
 
     elif mode == 1 and enable_optimization:
-            
-            def dfs(start, size, seating_arrangement):
-                # 优先尝试宽度为 2 - 3 列的区域
-                width_options = [2, 3]
-                random.shuffle(width_options)  # 添加搜索随机性，随机排列宽度选项
-                for width in width_options:
-                    stack = [start]
-                    visited = set()
-                    path = []
-                    while stack:
-                        # 随机选择栈中的元素
-                        random_index = random.randint(0, len(stack) - 1)
-                        current = stack.pop(random_index)
-                        if current in visited:
-                            continue
-                        visited.add(current)
-                        path.append(current)
-                        if len(path) == size:
-                            return path
-                        # 优先在宽度范围内进行搜索
-                        directions = [(1, 0), (-1, 0), (0, 1), (0, -1)]
-                        #random.shuffle(directions)  # 随机排列搜索方向
-                        for dx, dy in directions:
-                            new_x, new_y = current[0] + dx, current[1] + dy
-                            if 0 <= new_x < len(seating_arrangement) and 0 <= new_y < len(seating_arrangement[0]) and seating_arrangement[new_x][new_y] == '空' and (new_x, new_y) not in visited:
-                                # 简单检查宽度
-                                if abs(new_y - start[1]) < width:
-                                    stack.append((new_x, new_y))
+        # 小组模式采用按优先级的随机化连通区域搜索，不使用强化学习。
+        reserved_seats = reserved_seats or {}
+        height_by_name = {student[1]: student[2] for student in students_data}
+        new_teams = [
+            [name for name in team if name not in reserved_seats]
+            for team in (teams or [])
+        ]
+        available_seat_count = rows * cols - len(reserved_seats) - max(
+            0, rows * cols - num_students
+        )
+        required_team_seats = sum(len(team) for team in new_teams)
+        if required_team_seats > available_seat_count:
+            raise gr.Error(
+                f"目标小组共需要 {required_team_seats} 个座位，但当前只有 "
+                f"{available_seat_count} 个可用座位"
+            )
+        team_order = sorted(
+            range(len(new_teams)),
+            key=lambda index: sorts[index] if index < len(sorts) else index + 1,
+        )
+
+        def make_base_layout():
+            seating = [['空'] * cols for _ in range(rows)]
+            for name, (row, col) in reserved_seats.items():
+                if not (0 <= row < rows and 0 <= col < cols):
+                    raise ValueError("预留座位位置超出范围，请检查")
+                seating[row][col] = name
+            empty_count = rows * cols - num_students
+            empty_positions = [
+                (row, col) for row in range(rows) for col in range(cols)
+                if seating[row][col] == '空'
+            ]
+            for row, col in empty_positions[-empty_count:] if empty_count > 0 else []:
+                seating[row][col] = '预留空位'
+            return seating
+
+        def grow_region(start, size, seating, rng):
+            """Grow a connected region without recursive DFS backtracking."""
+            if size <= 0 or seating[start[0]][start[1]] != '空':
                 return None
-        
+            region = [start]
+            region_set = {start}
+            while len(region) < size:
+                frontier = {
+                    (row + row_delta, col + col_delta)
+                    for row, col in region
+                    for row_delta, col_delta in ((1, 0), (-1, 0), (0, 1), (0, -1))
+                    if (
+                        0 <= row + row_delta < rows
+                        and 0 <= col + col_delta < cols
+                        and (row + row_delta, col + col_delta) not in region_set
+                        and seating[row + row_delta][col + col_delta] == '空'
+                    )
+                }
+                if not frontier:
+                    return None
+                choices = list(frontier)
+                rng.shuffle(choices)
+                choices.sort(key=lambda seat: (
+                    sum(manhattan_distance(seat, existing) for existing in region),
+                    rng.random(),
+                ))
+                next_seat = choices[0]
+                region.append(next_seat)
+                region_set.add(next_seat)
+            return tuple(region)
 
-            seating_arrangement = [['空'] * cols for _ in range(rows)]
-            # 记录已安排座位的学生
-            assigned_students = set()
+        def place_team(seating, team, region):
+            result = [row[:] for row in seating]
+            ordered_members = sorted(team, key=lambda name: height_by_name.get(name, 0))
+            for seat, name in zip(sorted(region, key=lambda value: (value[0], value[1])), ordered_members):
+                result[seat[0]][seat[1]] = name
+            return result
 
-            # 处理预留座位
-            if reserved_seats:
-                for student, (row, col) in reserved_seats.items():
-                    if 0 <= row < rows and 0 <= col < cols:
-                        seating_arrangement[row][col] = student
-                        assigned_students.add(student)
-                    else:
-                        raise ValueError("预留座位位置超出范围，请检查")
-
-            # 计算需要留出的空位数量
-            empty_seats = rows * cols - num_students
-            if empty_seats > 0:
-                # 从右下角开始留空位
-                for i in range(rows - 1, -1, -1):
-                    for j in range(cols - 1, -1, -1):
-                        if empty_seats > 0 and seating_arrangement[i][j] == '空':
-                            seating_arrangement[i][j] = '预留空位'
-                            empty_seats -= 1
-
-            # 检查小团体里的预定座位是否太近
-            if groups:
-                for group in groups:
-                    reserved_group_students = [student for student in group if student in reserved_seats]
-                    if len(reserved_group_students) > 1:
-                        positions = {student: reserved_seats[student] for student in reserved_group_students}
-                        for student1 in reserved_group_students:
-                            for student2 in reserved_group_students:
-                                if student1 != student2:
-                                    if manhattan_distance(positions[student1], positions[student2]) <= 1:
-                                        raise gr.Error("小团体中预留座位的同学距离太近，请调整")
-
-            # 处理目标小组，消去有预定座位的同学
-            new_teams = []
-            for team in teams:
-                new_team = [student for student in team if student not in reserved_seats]
-                new_teams.append(new_team)
-
-            n = len(sorts)
-            sortx = [0] * n
-            for i, x in enumerate(sorts):
-                sortx[x - 1] = i
-            # 两个两个遍历 sortx
-            length = len(sortx)
-            if length % 2 == 0:
-                end_index = length - 2
-            else:
-                end_index = length - 1
-
-            for i in range(0, end_index, 2):
-                if random.random() < 0.5:
-                    sortx[i], sortx[i + 1] = sortx[i + 1], sortx[i]
-            # 将 sortx 再按 sort 的规则存到 sort 里
-            for i, x in enumerate(sortx):
-                sorts[x] = i + 1
-
-            priority_sorted = sorted(set(sorts))
-            for priority in priority_sorted:
-                team_index = sorts.index(priority)
+        def generate_layout(seed):
+            rng = random.Random(seed)
+            seating = make_base_layout()
+            for team_index in team_order:
                 team = new_teams[team_index]
-                team_students = sorted([(student, next((s[2] for s in students_data if s[1] == student), 0)) for student in team], key=lambda x: x[1])
-                team_students = [student[0] for student in team_students]
+                if not team:
+                    continue
+                starts = [
+                    (row, col) for row in range(rows) for col in range(cols)
+                    if seating[row][col] == '空'
+                ]
+                rng.shuffle(starts)
+                candidates = []
+                for start in starts[:min(96, len(starts))]:
+                    region = grow_region(start, len(team), seating, rng)
+                    if region is None:
+                        continue
+                    candidate = place_team(seating, team, region)
+                    score = _group_candidate_energy(
+                        candidate, height_by_name, [team], groups, rows, cols
+                    )
+                    score += 0.18 * sum(
+                        manhattan_distance(start, seat) for seat in region
+                    ) + rng.random() * 0.5
+                    candidates.append((score, candidate))
+                if not candidates:
+                    return None
+                _, seating = min(candidates, key=lambda item: item[0])
+            remaining = [
+                student for student in students_data
+                if student[1] not in reserved_seats
+                and all(student[1] not in team for team in new_teams)
+            ]
+            rng.shuffle(remaining)
+            for row in range(rows):
+                for col in range(cols):
+                    if seating[row][col] == '空' and remaining:
+                        seating[row][col] = remaining.pop()[1]
+            return seating
 
-                available_seats = [(i, j) for i in range(rows) for j in range(cols) if seating_arrangement[i][j] == '空']
-                best_region = None
-                best_score_team = float('inf')
-                for start_seat in available_seats:
-                    path = dfs(start_seat, len(team_students), seating_arrangement)
-                    if path:
-                        score = 0
-                        for i, student in enumerate(team_students):
-                            min_distance = float('inf')
-                            for seat in path:
-                                distance = manhattan_distance(start_seat, seat)
-                                min_distance = min(min_distance, distance)
-                            score += min_distance
-                        if score < best_score_team:
-                            best_score_team = score
-                            best_region = path
-
-                if best_region:
-                    # 确认小组分布图形所占的每一行的个数
-                    row_counts = [0] * rows
-                    for seat in best_region:
-                        row_counts[seat[0]] += 1
-
-                    # 将小组内的成员按照身高排序
-                    team_students_sorted = sorted(team_students, key=lambda s: next((stud[2] for stud in students_data if stud[1] == s), 0))
-
-                    # 一行一行从矮到高填充
-                    index = 0
-                    for row in range(rows):
-                        for _ in range(row_counts[row]):
-                            seat = next((s for s in best_region if s[0] == row and seating_arrangement[s[0]][s[1]] == '空'), None)
-                            if seat:
-                                seating_arrangement[seat[0]][seat[1]] = team_students_sorted[index]
-                                assigned_students.add(team_students_sorted[index])
-                                index += 1
-
-                    # 同一组同一行的人 shuffle
-                    for row in range(rows):
-                        same_row_seats = [seat for seat in best_region if seat[0] == row]
-                        same_row_students = [seating_arrangement[seat[0]][seat[1]] for seat in same_row_seats if seating_arrangement[seat[0]][seat[1]] in team_students]
-                        if len(same_row_students) > 1:
-                            random.shuffle(same_row_students)
-                            for i, seat in enumerate(same_row_seats):
-                                seating_arrangement[seat[0]][seat[1]] = same_row_students[i]
-
-                    # 同一组内身高相同或相差<平均身高/50的随机互换（用遍历）
-                    height_list = [next((stud[2] for stud in students_data if stud[1] == s), 0) for s in team_students]
-                    average_height = sum(height_list) / len(height_list) if height_list else 0
-                    height_pairs = []
-                    for i in range(len(team_students)):
-                        for j in range(i + 1, len(team_students)):
-                            height1 = next((stud[2] for stud in students_data if stud[1] == team_students[i]), 0)
-                            height2 = next((stud[2] for stud in students_data if stud[1] == team_students[j]), 0)
-                            if abs(height1 - height2) < average_height / 50:
-                                height_pairs.append((team_students[i], team_students[j]))
-
-                    random.shuffle(height_pairs)
-                    for student1, student2 in height_pairs:
-                        seat1 = next((seat for seat in best_region if seating_arrangement[seat[0]][seat[1]] == student1), None)
-                        seat2 = next((seat for seat in best_region if seating_arrangement[seat[0]][seat[1]] == student2), None)
-                        if seat1 and seat2:
-                            seating_arrangement[seat1[0]][seat1[1]], seating_arrangement[seat2[0]][seat2[1]] = seating_arrangement[seat2[0]][seat2[1]], seating_arrangement[seat1[0]][seat1[1]]
-
-            # 处理剩余的自由同学和最后一组无法聚集的同学
-            remaining_students = [student for student in students_data if
-                                student[1] not in assigned_students and student[1] not in (reserved_seats or {})]
-            remaining_indices = [(i, j) for i in range(rows) for j in range(cols) if seating_arrangement[i][j] == '空']
-            remaining_student_index = 0
-            for seat in remaining_indices:
-                if remaining_student_index < len(remaining_students):
-                    seating_arrangement[seat[0]][seat[1]] = remaining_students[remaining_student_index][1]
-                    remaining_student_index += 1
-
-########################################################################################################################################################
-
+        candidate_results = []
+        seed_base = random.SystemRandom().randrange(1, 2**31 - 1)
+        candidate_count = 60
+        for candidate_index in range(candidate_count):
+            candidate = None
+            for retry in range(8):
+                candidate = generate_layout(
+                    seed_base + candidate_index * 104729 + retry * 1009
+                )
+                if candidate is not None:
+                    break
+            if candidate is not None:
+                energy = _group_candidate_energy(
+                    candidate, height_by_name, new_teams, groups, rows, cols
+                )
+                candidate_results.append((energy, candidate))
+            if (candidate_index + 1) % 3 == 0:
+                print(
+                    f"[GROUP-SEARCH] Progress: {candidate_index + 1}/{candidate_count} "
+                    f"({(candidate_index + 1) * 100 / candidate_count:.1f}%), "
+                    f"valid={len(candidate_results)}",
+                    flush=True,
+                )
+        if not candidate_results:
+            raise gr.Error(
+                "无法为目标小组生成连通区域。请检查预留座位是否把可用座位切割成多个小块，"
+                "或减少小组人数、增加行列数后重试"
+            )
+        selected_energy, seating_arrangement = min(candidate_results, key=lambda item: item[0])
+        print(
+            f"[GROUP-SEARCH] Finished: candidates={len(candidate_results)}/{candidate_count}, "
+            f"best_energy={selected_energy:.4f}, priority_order={team_order}",
+            flush=True,
+        )
+        if _check_seating(seating_arrangement):
+            log_record("Successed", seating_arrangement, "Priority-based connected group search completed.")
+            return seating_arrangement
     else:
         gr.Info("当前执行秩序方面没有任何要求的简单排序，如果你启用了秩序优化模式但是看到了此提示，请检查你是否正确地进行了勾选、选择和输入")
         students = sorted(students_data, key=lambda x: x[2])  # 按身高排序

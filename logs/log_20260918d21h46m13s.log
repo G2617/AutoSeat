@@ -1,0 +1,15 @@
+[Generate Time]
+2026.09.18 - 21:46:13
+
+[State]
+Successed
+
+[Result]
+[
+   ['s6', 's0', 's1', 's2'],
+   ['s9', 's11', 's10', 's8'],
+   ['s3', 's4', 's5', 's7'],
+]
+
+[Other Info]
+Priority-based connected group search completed.
