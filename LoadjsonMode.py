@@ -17,7 +17,6 @@ with gr.Blocks(title="配置文件直接导入模式") as demo:
         optimization_output = gr.State()
         mode_output = gr.State()
         teams_output = gr.State()
-        sorts_output = gr.State()
         groups_output = gr.State()
         reserved_seats_output = gr.State()
 
@@ -98,16 +97,16 @@ with gr.Blocks(title="配置文件直接导入模式") as demo:
         import_json_button.click(
             import_json_config,
             inputs=json_file_input,
-            outputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, teams_output, sorts_output, groups_output, reserved_seats_output],
+            outputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, teams_output, groups_output, reserved_seats_output],
             api_name="import_json"
         ).then(
             # 为每列独立生成结果
-            lambda num_students, rows, cols, students_data, enable_optimization, mode, teams, sorts, groups, reserved_seats, _: [
-                *generate_page(num_students, rows, cols, students_data, enable_optimization, mode, teams, sorts, groups, reserved_seats),
-                *generate_page(num_students, rows, cols, students_data, enable_optimization, mode, teams, sorts, groups, reserved_seats),
-                *generate_page(num_students, rows, cols, students_data, enable_optimization, mode, teams, sorts, groups, reserved_seats)
+            lambda num_students, rows, cols, students_data, enable_optimization, mode, teams, groups, reserved_seats, _: [
+                *generate_page(num_students, rows, cols, students_data, enable_optimization, mode, teams, groups, reserved_seats),
+                *generate_page(num_students, rows, cols, students_data, enable_optimization, mode, teams, groups, reserved_seats),
+                *generate_page(num_students, rows, cols, students_data, enable_optimization, mode, teams, groups, reserved_seats)
             ],
-            inputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, teams_output, sorts_output, groups_output, reserved_seats_output, optimization_output],
+            inputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, teams_output, groups_output, reserved_seats_output, optimization_output],
             outputs=[
                 csv_file_col1, img1_col1, img2_col1, img3_col1, img4_col1, img5_col1, eval_col1,
                 csv_file_col2, img1_col2, img2_col2, img3_col2, img4_col2, img5_col2, eval_col2,
@@ -186,16 +185,16 @@ with gr.Blocks(title="配置文件直接导入模式") as demo:
         regenerate_button.click(
             import_json_config,
             inputs=json_file_input,
-            outputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, teams_output, sorts_output, groups_output, reserved_seats_output],
+            outputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, teams_output, groups_output, reserved_seats_output],
             api_name="import_json"
         ).then(
             # 为每列独立生成结果
-            lambda num_students, rows, cols, students_data, enable_optimization, mode, teams, sorts, groups, reserved_seats, _: [
-                *generate_page(num_students, rows, cols, students_data, enable_optimization, mode, teams, sorts, groups, reserved_seats),
-                *generate_page(num_students, rows, cols, students_data, enable_optimization, mode, teams, sorts, groups, reserved_seats),
-                *generate_page(num_students, rows, cols, students_data, enable_optimization, mode, teams, sorts, groups, reserved_seats)
+            lambda num_students, rows, cols, students_data, enable_optimization, mode, teams, groups, reserved_seats, _: [
+                *generate_page(num_students, rows, cols, students_data, enable_optimization, mode, teams, groups, reserved_seats),
+                *generate_page(num_students, rows, cols, students_data, enable_optimization, mode, teams, groups, reserved_seats),
+                *generate_page(num_students, rows, cols, students_data, enable_optimization, mode, teams, groups, reserved_seats)
             ],
-            inputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, teams_output, sorts_output, groups_output, reserved_seats_output, optimization_output],
+            inputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, teams_output, groups_output, reserved_seats_output, optimization_output],
             outputs=[
                 csv_file_col1, img1_col1, img2_col1, img3_col1, img4_col1, img5_col1, eval_col1,
                 csv_file_col2, img1_col2, img2_col2, img3_col2, img4_col2, img5_col2, eval_col2,

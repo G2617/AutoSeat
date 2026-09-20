@@ -16,7 +16,6 @@ with gr.Blocks(title="配置文件编辑模式") as demo:
     optimization_output = gr.State()
     mode_output = gr.State()
     teams_output = gr.State()
-    sorts_output = gr.State()
     groups_output = gr.State()
     reserved_seats_output = gr.State()
     file_name = gr.State()
@@ -47,18 +46,6 @@ with gr.Blocks(title="配置文件编辑模式") as demo:
                     gr.Markdown("编辑模式仅支持目标小组、小团体信息的文本框输入")
                     target_teams_text_input = gr.Textbox(label="请分行输入目标小组信息，每行若干个人的全名，用空格隔开，Shift+Enter来换行", visible=False)
                     teams_submit = gr.Button("提交目标小组", visible=False)
-                    priority = gr.State()
-                    target_teams_priority_input = gr.Dataframe(
-                        headers=["小组名", "优先顺序"],
-                        datatype=["str", "number"],
-                        col_count=(2, "fixed"),
-                        row_count=(0, "dynamic"),
-                        visible=False,
-                        interactive=True,
-                        type="pandas",
-                        label="目标小组优先顺序配置 优先顺序请输入从一到小组个数的正整数序列"
-                    )
-
                     group_text_input = gr.Textbox(label="请分行输入小团体信息，每行若干个人的全名，用空格隔开，Shift+Enter来换行，如果误触选项留空即可", visible=False)
                     gr.Markdown("座位预定表格中如果填入了信息，那么不论是否勾选进行座位预定都会考虑。因此取消勾选前建议将输入内容删除留空")
                     reservation_checkbox = gr.Checkbox(label="特定同学座位预定", value=False, visible=False)
@@ -66,7 +53,7 @@ with gr.Blocks(title="配置文件编辑模式") as demo:
                     reserved_students_input = gr.Dataframe(
                         headers=["学生学号", "学生姓名", "预定行", "预定列"],
                         datatype=["str", "str", "number", "number"],
-                        col_count=(4, "fixed"),
+                        column_count=(4, "fixed"),
                         row_count=(0, "dynamic"),
                         visible=False,
                         interactive=True,
@@ -87,12 +74,12 @@ with gr.Blocks(title="配置文件编辑模式") as demo:
             import_json_button.click(
                 import_json_config,
                 inputs=json_file_input,
-                outputs=[num_students_input, rows_input, cols_input, students_data_output, optimization_input, mode_output, team_nums, sorts_output, groups_output, reserved_seats_output],
+                outputs=[num_students_input, rows_input, cols_input, students_data_output, optimization_input, mode_output, team_nums, groups_output, reserved_seats_output],
                     api_name="import_json"
             ).then(
                 fill_json_config,
-                inputs=[num_students_input, rows_input, cols_input, students_data_output, optimization_input, mode_output, team_nums, sorts_output, groups_output, reserved_seats_output],
-                outputs=[num_students_input, rows_input, cols_input, students_text_input, optimization_input, mode_input, target_teams_text_input, priority, group_text_input, reservations],
+                inputs=[num_students_input, rows_input, cols_input, students_data_output, optimization_input, mode_output, team_nums, groups_output, reserved_seats_output],
+                outputs=[num_students_input, rows_input, cols_input, students_text_input, optimization_input, mode_input, target_teams_text_input, group_text_input, reservations],
                 api_name="fill_json_information"
             )
 
@@ -114,8 +101,8 @@ with gr.Blocks(title="配置文件编辑模式") as demo:
                 outputs=[target_teams_text_input, teams_submit, group_text_input, reservation_checkbox, optimization_input_submit]
             ).then(
                 fill_json_sheet,
-                inputs=[students_data_output, reservations, teams_output, priority],
-                outputs=[reserved_students_input, gr.State()]
+                inputs=[students_data_output, reservations],
+                outputs=reserved_students_input
             )
 
             optimization_input.change(
@@ -136,15 +123,15 @@ with gr.Blocks(title="配置文件编辑模式") as demo:
 
             teams_submit.click(
                 optimization_input_page,
-                inputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, gr.State(), target_teams_text_input, gr.State(), group_text_input, reservation_checkbox, reserved_students_input, target_teams_priority_input],
-                outputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, teams_output, sorts_output, groups_output, reserved_seats_output]
+                inputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, gr.State(), target_teams_text_input, gr.State(), group_text_input, reservation_checkbox, reserved_students_input],
+                outputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, teams_output, groups_output, reserved_seats_output]
             ).then(
                 fill_json_sheet,
-                inputs=[students_data_output, reservations, teams_output, priority],
-                outputs=[gr.State(), target_teams_priority_input]
+                inputs=[students_data_output, reservations],
+                outputs=reserved_students_input
             ).then(
-                lambda: [gr.update(visible=True), gr.update(visible=True), gr.update(visible=True)],
-                outputs=[target_teams_priority_input, group_text_input, reservation_checkbox]
+                lambda: [gr.update(visible=True), gr.update(visible=True)],
+                outputs=[group_text_input, reservation_checkbox]
             )
 
             reservation_checkbox.change(
@@ -159,8 +146,8 @@ with gr.Blocks(title="配置文件编辑模式") as demo:
 
             optimization_input_submit.click(
                 optimization_input_page,
-                inputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, gr.State(), target_teams_text_input, gr.State(), group_text_input, reservation_checkbox, reserved_students_input, target_teams_priority_input],
-                outputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, teams_output, sorts_output, groups_output, reserved_seats_output]
+                inputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, gr.State(), target_teams_text_input, gr.State(), group_text_input, reservation_checkbox, reserved_students_input],
+                outputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, teams_output, groups_output, reserved_seats_output]
             ).then(
                 if_and_ud2,
                 inputs=[gr.State(1)],
@@ -182,7 +169,7 @@ with gr.Blocks(title="配置文件编辑模式") as demo:
                 outputs=[file_name]
             )
 
-            def save_config_button_click_wrapper(arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, teams_output, sorts_output, groups_output, reserved_seats_output, name):
+            def save_config_button_click_wrapper(arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, teams_output, groups_output, reserved_seats_output, name):
                     #debug(arrangement_output, "arrangement_output")
                     #debug(rows_output, "rows_output")
                     #debug(cols_output, "cols_output")
@@ -194,11 +181,10 @@ with gr.Blocks(title="配置文件编辑模式") as demo:
                     enable_optimization = optimization_output.value if hasattr(optimization_output, 'value') else optimization_output
                     mode = mode_output.value if hasattr(mode_output, 'value') else mode_output
                     teams = teams_output.value if hasattr(teams_output, 'value') else teams_output
-                    sorts = sorts_output.value if hasattr(sorts_output, 'value') else sorts_output
                     groups = groups_output.value if hasattr(groups_output, 'value') else groups_output
                     reserved_seats = reserved_seats_output.value if hasattr(reserved_seats_output, 'value') else reserved_seats_output
 
-                    file_path = save_config_to_json(num_students, rows, cols, students_data, enable_optimization, mode, teams, sorts, groups, reserved_seats, name)
+                    file_path = save_config_to_json(num_students, rows, cols, students_data, enable_optimization, mode, teams, groups, reserved_seats, name)
                     dir_name = os.path.dirname(file_path)
                     file_name = os.path.basename(file_path)
                     gr.Info(f"保存成功，已经保存为\n{dir_name}\n目录下的\n{file_name}\n配置文件，点击重启程序来刷新配置列表")
@@ -207,7 +193,7 @@ with gr.Blocks(title="配置文件编辑模式") as demo:
             # 保存配置为 JSON 文件
             save_config_button.click(
                 fn=save_config_button_click_wrapper,
-                inputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, teams_output, sorts_output, groups_output, reserved_seats_output, file_name],
+                inputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, teams_output, groups_output, reserved_seats_output, file_name],
                 outputs=save_config_output
             )
 

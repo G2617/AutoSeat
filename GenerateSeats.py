@@ -120,7 +120,10 @@ def _group_candidate_energy(seating, height_by_name, new_teams, groups, rows, co
 def _train_q_episode(payload):
     """Train one independent episode in a separate process."""
     (initial_solution, students, continuous_targets, groups, rows, cols,
-     movable_names, initial_weights, max_height, min_height, action_count) = payload
+     movable_names, initial_weights, max_height, min_height, action_count,
+     episode_seed) = payload
+    random.seed(episode_seed)
+    np.random.seed(episode_seed % (2 ** 32 - 1))
     episode_weights = initial_weights.copy()
 
     def positions_map(solution):
@@ -189,6 +192,21 @@ def _train_q_episode(payload):
         )
         return result
 
+    def randomized_start(solution):
+        """Create an episode-specific starting layout without moving fixed seats."""
+        result = [row[:] for row in solution]
+        positions = dict(positions_map(result))
+        movable_positions = [
+            positions[name] for name in movable_names if name in positions
+        ]
+        movable_students = [
+            result[row][col] for row, col in movable_positions
+        ]
+        random.shuffle(movable_students)
+        for (row, col), student in zip(movable_positions, movable_students):
+            result[row][col] = student
+        return result
+
     def select_action(solution, current_energy, epsilon):
         positions = dict(positions_map(solution))
         actions = [
@@ -206,8 +224,16 @@ def _train_q_episode(payload):
                 positions_by_student[first] - positions_by_student[second]
             ) / max(1.0, max_height - min_height)
             delta = candidate_energy - current_energy
+            normalized_delta = np.tanh(delta)
             features = np.array(
-                [1.0, current_energy, candidate_energy, delta, height_gap, delta * delta],
+                [
+                    1.0,
+                    np.tanh(current_energy),
+                    np.tanh(candidate_energy),
+                    normalized_delta,
+                    height_gap,
+                    normalized_delta * normalized_delta,
+                ],
                 dtype=np.float64,
             )
             scored.append((
@@ -220,7 +246,7 @@ def _train_q_episode(payload):
             return random.choice(scored)
         return max(scored, key=lambda item: item[0])
 
-    state = [row[:] for row in initial_solution]
+    state = randomized_start(initial_solution)
     state_energy = energy(state)
     episode_steps = min(400, max(60, action_count * 2))
     for _ in range(episode_steps):
@@ -264,7 +290,7 @@ def calculate_energy(seating_arrangement, groups, rows, cols):
     return energy
 
 # 生成座位排列
-def generate_seating_arrangement(num_students, rows, cols, students_data, enable_optimization, mode, teams, sorts, groups, reserved_seats, steps):
+def generate_seating_arrangement(num_students, rows, cols, students_data, enable_optimization, mode, teams, groups, reserved_seats, steps):
 
     if steps > 50:
         gr.Info(f"自检模块检测到结果不合规，正在重新尝试生成 *{steps - 1}")
@@ -508,7 +534,7 @@ def generate_seating_arrangement(num_students, rows, cols, students_data, enable
         movable_names = [s[1] for s in students if s[1] not in (reserved_seats or {})]
         action_count = max(1, len(movable_names) * (len(movable_names) - 1) // 2)
         feature_size = 6
-        model_version = 4
+        model_version = 5
         imported_config_path = AlgorithmFunctions.imported_json_file_path
         if imported_config_path and os.path.isfile(imported_config_path):
             # 直接对 JSON 原始字节做 SHA-256；同名文件内容变化必然得到新模型键。
@@ -519,7 +545,7 @@ def generate_seating_arrangement(num_students, rows, cols, students_data, enable
             # 自定义输入没有 JSON 文件时，使用等价配置内容作为回退指纹。
             config_signature = repr((
                 num_students, rows, cols, students_data, enable_optimization, mode,
-                teams, sorts, groups, reserved_seats
+                teams, groups, reserved_seats
             )).encode("utf-8")
             config_hash = hashlib.sha256(config_signature).hexdigest()
             model_source = "runtime-input"
@@ -565,7 +591,18 @@ def generate_seating_arrangement(num_students, rows, cols, students_data, enable
                 - next(s[2] for s in students if s[1] == second)
             ) / max(1.0, max_height - min_height)
             delta = next_energy - current_energy
-            return np.array([1.0, current_energy, next_energy, delta, height_gap, delta * delta], dtype=np.float64)
+            normalized_delta = np.tanh(delta)
+            return np.array(
+                [
+                    1.0,
+                    np.tanh(current_energy),
+                    np.tanh(next_energy),
+                    normalized_delta,
+                    height_gap,
+                    normalized_delta * normalized_delta,
+                ],
+                dtype=np.float64,
+            )
 
         def select_action(solution, current_energy, epsilon, policy_weights):
             actions = candidate_actions(solution)
@@ -583,7 +620,7 @@ def generate_seating_arrangement(num_students, rows, cols, students_data, enable
             return max(scored, key=lambda item: item[0])
 
         # 每个配置独立训练，避免不同班级的奖励分布相互污染。
-        training_episodes = 6 if loaded_model else 48
+        training_episodes = 12 if loaded_model else 48
         worker_count = _rl_worker_count(training_episodes)
         print(
             f"[RL] Training started ({'fine-tuning' if loaded_model else 'first run'}), "
@@ -595,11 +632,14 @@ def generate_seating_arrangement(num_students, rows, cols, students_data, enable
 
         worker_payload = (
             current_solution, students, continuous_targets, groups, rows, cols,
-            movable_names, weights, max_height, min_height, action_count
+            movable_names, weights, max_height, min_height, action_count, None
         )
         with ProcessPoolExecutor(max_workers=worker_count) as executor:
             futures = [
-                executor.submit(_train_q_episode, worker_payload)
+                executor.submit(
+                    _train_q_episode,
+                    worker_payload[:-1] + (random.randrange(1, 2 ** 32 - 1),),
+                )
                 for _ in range(training_episodes)
             ]
             episode_results = []
@@ -672,10 +712,7 @@ def generate_seating_arrangement(num_students, rows, cols, students_data, enable
                 f"目标小组共需要 {required_team_seats} 个座位，但当前只有 "
                 f"{available_seat_count} 个可用座位"
             )
-        team_order = sorted(
-            range(len(new_teams)),
-            key=lambda index: sorts[index] if index < len(sorts) else index + 1,
-        )
+        team_order = list(range(len(new_teams)))
 
         def make_base_layout():
             seating = [['空'] * cols for _ in range(rows)]
@@ -801,7 +838,7 @@ def generate_seating_arrangement(num_students, rows, cols, students_data, enable
         selected_energy, seating_arrangement = min(candidate_results, key=lambda item: item[0])
         print(
             f"[GROUP-SEARCH] Finished: candidates={len(candidate_results)}/{candidate_count}, "
-            f"best_energy={selected_energy:.4f}, priority_order={team_order}",
+            f"best_energy={selected_energy:.4f}, team_order=input-order",
             flush=True,
         )
         if _check_seating(seating_arrangement):
@@ -898,7 +935,7 @@ def generate_seating_arrangement(num_students, rows, cols, students_data, enable
     else:
             gr.Info("生成的座位安排不符合要求，正在重新生成")
             log_record("Half Failed", seating_arrangement, f"Result not legal. Already tried {steps} times.")
-            return generate_seating_arrangement(num_students, rows, cols, students_data, enable_optimization, mode, teams, sorts, groups, reserved_seats, steps + 1)
+            return generate_seating_arrangement(num_students, rows, cols, students_data, enable_optimization, mode, teams, groups, reserved_seats, steps + 1)
     
 
 def generate_images(seating_arrangement, students_data, teams=[]):

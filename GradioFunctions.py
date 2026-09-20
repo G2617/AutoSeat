@@ -87,10 +87,9 @@ def mode_selection_page(num_students, rows, cols, students_data, enable_optimiza
 
 # 秩序优化模式输入
 def optimization_input_page(num_students, rows, cols, students_data, enable_optimization, mode, target_teams_file=None, target_teams_text=None, group_file=None,
-                            group_text=None, enable_reservation=False, reserved_students=None, target_teams_priority=None):
+                            group_text=None, enable_reservation=False, reserved_students=None):
     groups = []
     teams = []
-    sorts = []
     reserved_seats = {}
     if enable_optimization:
         if mode == 1:
@@ -110,22 +109,6 @@ def optimization_input_page(num_students, rows, cols, students_data, enable_opti
                     teams.append(parts)
             else:
                 raise gr.Error("目标小组输入不能为空，请输入")
-
-            if target_teams_priority is not None and not target_teams_priority.empty:
-                priorities = target_teams_priority.values.tolist()
-                num_teams = len(teams)
-                expected_priorities = set(range(1, num_teams + 1))
-                for team_name, priority in priorities:
-                    try:
-                        priority = int(priority)
-                        if priority not in expected_priorities:
-                            raise gr.Error(f"优先顺序输入错误，{team_name}的优先顺序{priority}不在有效范围内或未按照顺序填写")
-                        sorts.append(priority)
-                        expected_priorities.remove(priority)
-                    except ValueError:
-                        raise gr.Error(f"{team_name}的优先顺序输入不是有效的正整数")
-                if expected_priorities:
-                    raise gr.Error("优先顺序输入不正确，某些小组的优先顺序不在有效范围内或未按照顺序填写")
 
         if group_file:
             try:
@@ -149,7 +132,9 @@ def optimization_input_page(num_students, rows, cols, students_data, enable_opti
                 student_dict = {s[0]: s[1] for s in students_data}  # 构建学号到姓名的映射
                 seat_booked = {}  # 用于记录每个座位是否已被预定
                 for index, (id, student, row, col) in enumerate(reserved_students.values.tolist()):
-                    if (row is not None and col is not None) and (row != '' and col != ''):  # 仅处理
+                    row_empty = row is None or row == '' or pd.isna(row)
+                    col_empty = col is None or col == '' or pd.isna(col)
+                    if not row_empty and not col_empty:
                         if isinstance(id, str) and id.isalnum():
                             if id in student_dict:
                                 student = student_dict[id]
@@ -190,7 +175,7 @@ def optimization_input_page(num_students, rows, cols, students_data, enable_opti
                 gr.Info("预定座位输入当前为空，如若不使用此功能请忽略")
     else:
         gr.Info("秩序优化模式已关闭，因此如果目标小组、小团体、预定座位有过输入也会被忽略")
-    return num_students, rows, cols, students_data, enable_optimization, mode, teams, sorts, groups, reserved_seats
+    return num_students, rows, cols, students_data, enable_optimization, mode, teams, groups, reserved_seats
 
 
 # 生成初始的学生数据，包含学号、姓名、行、列
@@ -200,25 +185,14 @@ def generate_initial_student_data(students_data):
         data.append([student[0], student[1], None, None])
     return data
 
-def fill_target_teams_priority(teams_output):
-    teams = teams_output or []
-    # 过滤掉空的小组信息
-    valid_teams = [team for team in teams if team]
-    data = []
-    for i, team in enumerate(valid_teams, 1):
-        if team:
-            group_name = team[0] + "小组"
-            data.append([group_name, i])
-    return pd.DataFrame(data, columns=["小组名", "优先顺序"])
-
 # 生成座位排列并输出图片
-def generate_page(num_students, rows, cols, students_data, enable_optimization, mode, teams, sorts, groups, reserved_seats):
+def generate_page(num_students, rows, cols, students_data, enable_optimization, mode, teams, groups, reserved_seats):
     if num_students is None or rows is None or cols is None or students_data is None:
         log_record("Failed", [], f"Inputs not legal.\nGenerating didn't start because of the error.")
         raise gr.Error("必填信息有空缺，生成失败，请检查")
     else:
         try:
-            seating_arrangement = generate_seating_arrangement(num_students, rows, cols, students_data, enable_optimization, mode, teams, sorts, groups, reserved_seats, 0)
+            seating_arrangement = generate_seating_arrangement(num_students, rows, cols, students_data, enable_optimization, mode, teams, groups, reserved_seats, 0)
             if seating_arrangement == "i":
                 log_record("Failed", [], "Result not legal.\nGenerating failed after trying several times.")
                 raise gr.Error("座位生成失败，请调节输入后重试")

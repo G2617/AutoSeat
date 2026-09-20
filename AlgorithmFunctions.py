@@ -35,17 +35,16 @@ def import_json_config(config_file):
     students_data = config.get('students_data', [])
     mode = config.get('mode', 0)
     teams = config.get('teams', [])
-    sorts = config.get('sorts', [])
     groups = config.get('groups', [])
     reserved_seats = config.get('reserved_seats', {})
     enable_optimization = bool(config.get('enable_optimization', False))
     gr.Info("配置文件导入成功，请等待")
     imported_json_file_path = file_path
     time.sleep(3)
-    return num_students, rows, cols, students_data, enable_optimization, mode, teams, sorts, groups, reserved_seats
+    return num_students, rows, cols, students_data, enable_optimization, mode, teams, groups, reserved_seats
 
 # 导入 JSON 配置
-def fill_json_config(num_students_input, rows_input, cols_input, students_data_output, optimization_input, mode_output, teams_output, sorts_output, groups_output, reserved_seats_output):
+def fill_json_config(num_students_input, rows_input, cols_input, students_data_output, optimization_input, mode_output, teams_output, groups_output, reserved_seats_output):
     if mode_output == 0:
         mode_input = "离散模式"
     elif mode_output == 1:
@@ -53,7 +52,6 @@ def fill_json_config(num_students_input, rows_input, cols_input, students_data_o
     else:
         mode_output = None
 
-    sorts = sorts_output
     reservations = reserved_seats_output
     students_text_input = ""
     for sub_list in students_data_output:
@@ -76,9 +74,9 @@ def fill_json_config(num_students_input, rows_input, cols_input, students_data_o
             group_text_input = group_text_input[:-1]
             group_text_input += '\n'
         group_text_input = group_text_input[:-1]
-    return num_students_input, rows_input, cols_input, students_text_input, optimization_input, mode_input, target_teams_text_input, sorts, group_text_input, reservations
+    return num_students_input, rows_input, cols_input, students_text_input, optimization_input, mode_input, target_teams_text_input, group_text_input, reservations
 
-def fill_json_sheet(students, reservation, teams, priority):
+def fill_json_sheet(students, reservation):
     reservation_data = []
     for student in students:
         # 检查 student[1] 是否在 reservation 中
@@ -92,39 +90,15 @@ def fill_json_sheet(students, reservation, teams, priority):
         else:
             reservation_data.append([student[0], student[1], None, None])
     
-    priority_data = []
-    if teams:
-        data = []
-        if len(priority) == len(teams):
-            gr.Info("检测到当前输入的目标小组数量仍然与导入的配置文件相同，故自动应用配置文件中的小组顺序")
-            for i, team in enumerate(teams, 1):
-                if team:
-                    group_name = team[0] + "小组"
-                    data.append([group_name, priority[i - 1]])
-        else:
-            gr.Info("检测到当前输入的目标小组数量与导入的配置文件不同，故重新进行排序")
-            for i, team in enumerate(teams, 1):
-                if team:
-                    group_name = team[0] + "小组"
-                    data.append([group_name, i])
-        priority_data = pd.DataFrame(data, columns=["小组名", "优先顺序"])
-    
     if isinstance(reservation_data, pd.DataFrame) and reservation_data.empty:
         reservation_result = []
     else:
         reservation_result = reservation_data
-
-    # 检查 priority_data 是否为空
-    if isinstance(priority_data, pd.DataFrame) and priority_data.empty:
-        priority_result = []
-    else:
-        priority_result = priority_data
-
-    return reservation_result, priority_result
+    return reservation_result
 
 
 # 保存配置为 JSON 文件
-def save_config_to_json(num_students, rows, cols, students_data, enable_optimization, mode, teams, sorts, groups, reserved_seats, name):
+def save_config_to_json(num_students, rows, cols, students_data, enable_optimization, mode, teams, groups, reserved_seats, name):
     config = {
         'num_students': num_students,
         'rows': rows,
@@ -133,7 +107,6 @@ def save_config_to_json(num_students, rows, cols, students_data, enable_optimiza
         'enable_optimization': enable_optimization,
         'mode': mode,
         'teams': teams,
-        'sorts': sorts,
         'groups': groups,
         'reserved_seats': reserved_seats
     }

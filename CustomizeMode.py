@@ -2,7 +2,7 @@ import gradio as gr
 import os
 from AlgorithmFunctions import save_config_to_json, save_image_and_get_path
 from GradioFunctions import welcome_page, seating_arrangement_page, input_method_page, input_students_page
-from GradioFunctions import optimization_mode_page, mode_selection_page, optimization_input_page, fill_target_teams_priority, generate_page
+from GradioFunctions import optimization_mode_page, mode_selection_page, optimization_input_page, generate_page
 from GradioFunctions import get_initial_data, show_reservation_input, show_group_input, show_target_teams_input
 from GradioFunctions import if_and_ud1, if_and_ud2
 
@@ -19,7 +19,6 @@ with gr.Blocks(title="自定义输入模式") as demo:
             optimization_output = gr.State()
             mode_output = gr.State()
             teams_output = gr.State()
-            sorts_output = gr.State()
             groups_output = gr.State()
             reserved_seats_output = gr.State()
 
@@ -52,17 +51,6 @@ with gr.Blocks(title="自定义输入模式") as demo:
                     target_teams_file_input = gr.File(label="请拖入 txt 文件", visible=False)
                     target_teams_text_input = gr.Textbox(label="请分行输入目标小组信息，每行若干个人的全名，用空格隔开，Shift+Enter来换行", visible=False)
                     teams_submit = gr.Button("提交目标小组", visible=False)
-                    target_teams_priority_input = gr.Dataframe(
-                        headers=["小组名", "优先顺序"],
-                        datatype=["str", "number"],
-                        col_count=(2, "fixed"),
-                        row_count=(0, "dynamic"),
-                        visible=False,
-                        interactive=True,
-                        type="pandas",
-                        label="目标小组优先顺序配置 优先顺序请输入从一到小组个数的正整数序列"
-                    )
-
                     group_input_method = gr.Radio(["文件输入", "文本输入"], label="请选择小团体输入方式", visible=False)
                     group_file_input = gr.File(label="请拖入 txt 文件", visible=False)
                     group_text_input = gr.Textbox(label="请分行输入小团体信息，每行若干个人的全名，用空格隔开，Shift+Enter来换行，如果误触选项留空即可", visible=False)
@@ -71,7 +59,7 @@ with gr.Blocks(title="自定义输入模式") as demo:
                     reserved_students_input = gr.Dataframe(
                         headers=["学生学号", "学生姓名", "预定行", "预定列"],
                         datatype=["str", "str", "number", "number"],
-                        col_count=(4, "fixed"),
+                        column_count=(4, "fixed"),
                         row_count=(0, "dynamic"),
                         visible=False,
                         interactive=True,
@@ -217,7 +205,7 @@ with gr.Blocks(title="自定义输入模式") as demo:
                         gr.update(visible=False) if not v else gr.update()
                  ],
                 inputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output],
-                outputs=[mode_input, target_teams_input_method, target_teams_text_input, target_teams_file_input, teams_submit, group_input_method, group_text_input, group_file_input, reservation_checkbox, reserved_students_input, target_teams_priority_input, optimization_input_submit]
+                outputs=[mode_input, target_teams_input_method, target_teams_text_input, target_teams_file_input, teams_submit, group_input_method, group_text_input, group_file_input, reservation_checkbox, reserved_students_input, optimization_input_submit]
             )
 
             mode_input.change(
@@ -260,10 +248,6 @@ with gr.Blocks(title="自定义输入模式") as demo:
                 lambda x, y, z, w, v, m: gr.update(visible=True if m == 0 else False),
                 inputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output],
                 outputs=[optimization_input_submit]
-            ).then(
-                lambda x, y, z, w, v, m: gr.update(visible=False if m == 0 else None),
-                inputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output],
-                outputs=[target_teams_priority_input]
             )
 
             #*****#
@@ -278,15 +262,8 @@ with gr.Blocks(title="自定义输入模式") as demo:
             )
             teams_submit.click(
                 optimization_input_page,
-                inputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, target_teams_file_input, target_teams_text_input, group_file_input, group_text_input, reservation_checkbox, reserved_students_input, target_teams_priority_input],
-                outputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, teams_output, sorts_output, groups_output, reserved_seats_output]
-            ).then(
-                fill_target_teams_priority,
-                inputs=teams_output,
-                outputs=target_teams_priority_input
-            ).then(
-                lambda: gr.update(visible=True),
-                outputs=[target_teams_priority_input]
+                inputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, target_teams_file_input, target_teams_text_input, group_file_input, group_text_input, reservation_checkbox, reserved_students_input],
+                outputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, teams_output, groups_output, reserved_seats_output]
             ).then(
                 lambda: gr.update(visible=True),
                 outputs=[group_input_method]
@@ -324,8 +301,8 @@ with gr.Blocks(title="自定义输入模式") as demo:
             #*****#
             optimization_input_submit.click(
                 optimization_input_page,
-                inputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, target_teams_file_input, target_teams_text_input, group_file_input, group_text_input, reservation_checkbox, reserved_students_input, target_teams_priority_input],
-                outputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, teams_output, sorts_output, groups_output, reserved_seats_output]
+                inputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, target_teams_file_input, target_teams_text_input, group_file_input, group_text_input, reservation_checkbox, reserved_students_input],
+                outputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, teams_output, groups_output, reserved_seats_output]
             ).then(
                 lambda: gr.update(visible=True),
                 outputs=generate_button
@@ -336,16 +313,16 @@ with gr.Blocks(title="自定义输入模式") as demo:
                 outputs=[gr.State()]
             ).then(
                 optimization_input_page,
-                inputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, target_teams_file_input, target_teams_text_input, group_file_input, group_text_input, reservation_checkbox, reserved_students_input, target_teams_priority_input],
-                outputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, teams_output, sorts_output, groups_output, reserved_seats_output]
+                inputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, target_teams_file_input, target_teams_text_input, group_file_input, group_text_input, reservation_checkbox, reserved_students_input],
+                outputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, teams_output, groups_output, reserved_seats_output]
             ).then(
             # 为每列独立生成结果
-                lambda num_students, rows, cols, students_data, enable_optimization, mode, teams, sorts, groups, reserved_seats, _: [
-                    *generate_page(num_students, rows, cols, students_data, enable_optimization, mode, teams, sorts, groups, reserved_seats),
-                    *generate_page(num_students, rows, cols, students_data, enable_optimization, mode, teams, sorts, groups, reserved_seats),
-                    *generate_page(num_students, rows, cols, students_data, enable_optimization, mode, teams, sorts, groups, reserved_seats)
+                lambda num_students, rows, cols, students_data, enable_optimization, mode, teams, groups, reserved_seats, _: [
+                    *generate_page(num_students, rows, cols, students_data, enable_optimization, mode, teams, groups, reserved_seats),
+                    *generate_page(num_students, rows, cols, students_data, enable_optimization, mode, teams, groups, reserved_seats),
+                    *generate_page(num_students, rows, cols, students_data, enable_optimization, mode, teams, groups, reserved_seats)
                 ],
-                inputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, teams_output, sorts_output, groups_output, reserved_seats_output, optimization_output],
+                inputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, teams_output, groups_output, reserved_seats_output, optimization_output],
                 outputs=[
                     csv_file_col1, img1_col1, img2_col1, img3_col1, img4_col1, img5_col1, eval_col1,
                     csv_file_col2, img1_col2, img2_col2, img3_col2, img4_col2, img5_col2, eval_col2,
@@ -426,12 +403,12 @@ with gr.Blocks(title="自定义输入模式") as demo:
                 outputs=[gr.State()]
             ).then(
                 # 为每列独立生成结果
-                lambda num_students, rows, cols, students_data, enable_optimization, mode, teams, sorts, groups, reserved_seats, _: [
-                    *generate_page(num_students, rows, cols, students_data, enable_optimization, mode, teams, sorts, groups, reserved_seats),
-                    *generate_page(num_students, rows, cols, students_data, enable_optimization, mode, teams, sorts, groups, reserved_seats),
-                    *generate_page(num_students, rows, cols, students_data, enable_optimization, mode, teams, sorts, groups, reserved_seats)
+                lambda num_students, rows, cols, students_data, enable_optimization, mode, teams, groups, reserved_seats, _: [
+                    *generate_page(num_students, rows, cols, students_data, enable_optimization, mode, teams, groups, reserved_seats),
+                    *generate_page(num_students, rows, cols, students_data, enable_optimization, mode, teams, groups, reserved_seats),
+                    *generate_page(num_students, rows, cols, students_data, enable_optimization, mode, teams, groups, reserved_seats)
                 ],
-                inputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, teams_output, sorts_output, groups_output, reserved_seats_output, optimization_output],
+                inputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, teams_output, groups_output, reserved_seats_output, optimization_output],
                 outputs=[
                     csv_file_col1, img1_col1, img2_col1, img3_col1, img4_col1, img5_col1, eval_col1,
                     csv_file_col2, img1_col2, img2_col2, img3_col2, img4_col2, img5_col2, eval_col2,
@@ -501,7 +478,7 @@ with gr.Blocks(title="自定义输入模式") as demo:
                 api_name="show_info_after_import"
             )
 
-            def save_config_button_click_wrapper(arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, teams_output, sorts_output, groups_output, reserved_seats_output):
+            def save_config_button_click_wrapper(arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, teams_output, groups_output, reserved_seats_output):
                     # 正常保存配置逻辑
                     num_students = arrangement_output.value if hasattr(arrangement_output, 'value') else arrangement_output
                     rows = rows_output.value if hasattr(rows_output, 'value') else rows_output
@@ -510,11 +487,10 @@ with gr.Blocks(title="自定义输入模式") as demo:
                     enable_optimization = optimization_output.value if hasattr(optimization_output, 'value') else optimization_output
                     mode = mode_output.value if hasattr(mode_output, 'value') else mode_output
                     teams = teams_output.value if hasattr(teams_output, 'value') else teams_output
-                    sorts = sorts_output.value if hasattr(sorts_output, 'value') else sorts_output
                     groups = groups_output.value if hasattr(groups_output, 'value') else groups_output
                     reserved_seats = reserved_seats_output.value if hasattr(reserved_seats_output, 'value') else reserved_seats_output
 
-                    file_path = save_config_to_json(num_students, rows, cols, students_data, enable_optimization, mode, teams, sorts, groups, reserved_seats, None)
+                    file_path = save_config_to_json(num_students, rows, cols, students_data, enable_optimization, mode, teams, groups, reserved_seats, None)
                     dir_name = os.path.dirname(file_path)
                     file_name = os.path.basename(file_path)
                     gr.Info(f"保存成功，已经保存为\n{dir_name}\n目录下的\n{file_name}\n配置文件，点击重启程序来刷新配置列表")
@@ -523,7 +499,7 @@ with gr.Blocks(title="自定义输入模式") as demo:
             # 保存配置为 JSON 文件
             save_config_button.click(
                 fn=save_config_button_click_wrapper,
-                inputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, teams_output, sorts_output, groups_output, reserved_seats_output],
+                inputs=[arrangement_output, rows_output, cols_output, students_data_output, optimization_output, mode_output, teams_output, groups_output, reserved_seats_output],
                 outputs=save_config_output
             )
 
