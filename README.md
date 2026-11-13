@@ -1,3 +1,15 @@
+---
+title: AutoSeat
+emoji: 🪑
+colorFrom: blue
+colorTo: green
+sdk: gradio
+sdk_version: 6.26.0
+app_file: main.py
+pinned: false
+license: gpl-3.0
+---
+
 # AutoSeat 班级座位排列工具
 
 AutoSeat 是一个基于 Python 和 Gradio 的班级座位编排工具。你可以输入学生信息和教室行列数，生成多组座位方案，并按身高、目标小组、小团体和指定座位等条件进行辅助安排。
