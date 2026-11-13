@@ -13,3 +13,4 @@ ENV/
 logs/
 jsons/
 rl_models/
+.gradio/
