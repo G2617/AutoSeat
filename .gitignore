@@ -14,3 +14,4 @@ logs/
 jsons/
 rl_models/
 .gradio/
+images/
