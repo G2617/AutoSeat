@@ -14,6 +14,16 @@ license: gpl-3.0
 
 AutoSeat 是一个基于 Python 和 Gradio 的班级座位编排工具。你可以输入学生信息和教室行列数，生成多组座位方案，并按身高、目标小组、小团体和指定座位等条件进行辅助安排。
 
+## 演示视频
+
+https://github.com/user-attachments/assets/d3e5b297-a17d-4847-9074-e04715e75b3a
+
+## 上手体验 JSON 文件导入模式
+
+https://modelscope.cn/studios/JiangCarrey/AutoSeat
+
+*[注]本模式导入后需要等待较长时间以完成模型训练，具体进度在右上角三点按钮->查看日志->运行日志->打开“轮询5秒刷新”观察*
+
 ## 功能
 
 - **自定义输入**：通过文本或 `.xlsx` 表格录入学生信息。
