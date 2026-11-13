@@ -10,3 +10,6 @@ ENV/
 .vscode/
 *.swp
 .DS_Store
+logs/
+jsons/
+rl_models/
