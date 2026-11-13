@@ -22,8 +22,6 @@ https://github.com/user-attachments/assets/d3e5b297-a17d-4847-9074-e04715e75b3a
 
 https://modelscope.cn/studios/JiangCarrey/AutoSeat
 
-*[注]本模式导入后需要等待较长时间以完成模型训练，具体进度在右上角三点按钮->查看日志->运行日志->打开“轮询5秒刷新”观察*
-
 ## 功能
 
 - **自定义输入**：通过文本或 `.xlsx` 表格录入学生信息。
