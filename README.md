@@ -5,7 +5,7 @@ colorFrom: blue
 colorTo: green
 sdk: gradio
 sdk_version: 6.26.0
-app_file: main.py
+app_file: Main.py
 pinned: false
 license: gpl-3.0
 ---
